@@ -41,8 +41,13 @@ export async function middleware(request: NextRequest) {
 
   if (isOnboarding && user && !shouldRedirectToOnboarding) {
     const url = request.nextUrl.clone();
-    url.pathname = shopHint ? `/app?shop=${shopHint}` : '/app';
-    url.search = '';
+    // The query string must be assigned to `search`, never interpolated into
+    // `pathname`. Putting it in the pathname percent-encodes the "?", so the
+    // browser is sent to /app%3Fshop=<id>, which does not exist, and the
+    // retailer lands on the not-found page immediately after finishing
+    // onboarding.
+    url.pathname = '/app';
+    url.search = shopHint ? `?shop=${encodeURIComponent(shopHint)}` : '';
     return NextResponse.redirect(url);
   }
 

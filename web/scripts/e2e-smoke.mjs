@@ -329,13 +329,50 @@ const negative = await api('/api/assistant/recall', {
   }),
 });
 const negativeText = (negative.body?.answer ?? '').toLowerCase();
+
+/**
+ * What must be true after asking about a supplier that was never recorded.
+ *
+ * Two behaviours are acceptable:
+ *
+ *   a) an explicit refusal, or
+ *   b) an answer that points at the records that DO exist without attributing
+ *      any figure to the unknown supplier.
+ *
+ * The second is not a failure. Retrieval searches recorded event summaries, and
+ * the question contains generic domain words such as "delivery", so records for
+ * a different supplier can legitimately match. Naming the supplier that actually
+ * has the record is honest. What would be dishonest, and what this asserts
+ * against, is stating an agreed amount for Beta Frozen Foods.
+ *
+ * Asserting a specific refusal phrase instead would make this test fail on
+ * wording rather than on behaviour, which is how it briefly did.
+ */
+const AMOUNT = /\b\d[\d,]*(\.\d+)?\b/;
+
+function attributesAmountTo(supplier, answer) {
+  const lower = answer.toLowerCase();
+  const supplierLower = supplier.toLowerCase();
+  let index = lower.indexOf(supplierLower);
+  while (index !== -1) {
+    const window = lower.slice(Math.max(0, index - 80), index + supplierLower.length + 120);
+    if (AMOUNT.test(window)) return true;
+    index = lower.indexOf(supplierLower, index + 1);
+  }
+  return false;
+}
+
+const noSourceClaimsUnknownSupplier = (negative.body?.sources ?? []).every(
+  (s) => (s.supplierName ?? '').toLowerCase() !== 'beta frozen foods',
+);
+
 record(
-  'negative control refuses to invent',
-  negativeText.includes("couldn't find") ||
-    negativeText.includes('couldn’t find') ||
-    negativeText.includes('no saved record') ||
-    (negative.body?.sources?.length ?? 0) === 0,
-  negativeText.slice(0, 120),
+  'negative control invents no figure for an unrecorded supplier',
+  !attributesAmountTo('Beta Frozen Foods', negative.body?.answer ?? '') &&
+    noSourceClaimsUnknownSupplier,
+  attributesAmountTo('Beta Frozen Foods', negative.body?.answer ?? '')
+    ? 'attributed an amount to an unrecorded supplier'
+    : `answered from ${negative.body?.sources?.length ?? 0} real source(s), none of them the unknown supplier`,
 );
 
 // ---------------------------------------------------------------------------
