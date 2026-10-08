@@ -6,6 +6,8 @@
  * untested isolation guarantee.
  */
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import fs from 'node:fs';
+import path from 'node:path';
 
 export interface Harness {
   admin: SupabaseClient;
@@ -13,22 +15,24 @@ export interface Harness {
   reason: string;
 }
 
+/**
+ * Load the same environment the app uses.
+ *
+ * Vitest runs with web/ as its root, so paths are resolved from the current
+ * working directory rather than from import.meta.url, which yields a malformed
+ * path on Windows.
+ */
 export function loadEnv(): Record<string, string> {
-  // Tests read the same environment as the app. A local .env is loaded without
-  // adding a dotenv dependency by parsing it here.
-  const merged: Record<string, string> = { ...process.env } as Record<string, string>;
+  const merged: Record<string, string> = { ...(process.env as Record<string, string>) };
 
   const candidates = [
-    new URL('../../web/.env.local', import.meta.url).pathname.replace(/^\//, ''),
-    new URL('../../.env', import.meta.url).pathname.replace(/^\//, ''),
-    'web/.env.local',
-    '.env',
+    path.resolve(process.cwd(), '.env.local'),
+    path.resolve(process.cwd(), '.env'),
+    path.resolve(process.cwd(), '..', '.env'),
   ];
 
   for (const candidate of candidates) {
     try {
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const fs = require('node:fs') as typeof import('node:fs');
       if (!fs.existsSync(candidate)) continue;
       const raw = fs.readFileSync(candidate, 'utf8');
       for (const line of raw.split('\n')) {
@@ -37,7 +41,13 @@ export function loadEnv(): Record<string, string> {
         const index = trimmed.indexOf('=');
         if (index === -1) continue;
         const key = trimmed.slice(0, index).trim();
-        const value = trimmed.slice(index + 1).trim();
+        let value = trimmed.slice(index + 1).trim();
+        if (
+          (value.startsWith('"') && value.endsWith('"')) ||
+          (value.startsWith("'") && value.endsWith("'"))
+        ) {
+          value = value.slice(1, -1);
+        }
         if (!merged[key] || merged[key] === '') merged[key] = value;
       }
       break;

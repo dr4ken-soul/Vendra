@@ -1,166 +1,132 @@
-# Walrus Memory: Custody Decision and Verification Status
+# Walrus Memory: custody decision and verification state
 
-**Status: implemented, not yet verified against live credentials.**
+This file records what was decided about Walrus Memory, what has actually been
+verified, and what remains blocked. It is written to be read by someone deciding
+whether to trust the claims in this repository.
 
-This document completes the decision record required by
-`WALRUS_ACCOUNT_CUSTODY.md`.
-
----
-
-## 1. Chosen model
-
-**Service-managed, one owner account and one namespace per shop.**
-
-| Item | Value |
-|---|---|
-| Model | Service-managed (option B in `WALRUS_ACCOUNT_CUSTODY.md`) |
-| Account | The operator's Walrus Memory account object id |
-| Isolation boundary | A unique server-assigned namespace per shop |
-| Delegate | One Ed25519 delegate key in the server environment |
-| Owner signing | `service_custodian` — the server signs |
-| Retailer holds the owner key? | **No** |
-| Database stores | Opaque account id, namespace, owner address, key *reference* |
-
-This is custodial and is described as custodial in onboarding, in settings and
-in `/privacy`. The word "retailer-owned" is not used anywhere.
+**Short version: no Walrus Memory claim in this repository is verified.** The
+adapter is written against the real SDK's published TypeScript interface, but it
+has never been executed against a live Walrus Memory account, because no such
+account exists yet.
 
 ---
 
-## 2. Why not retailer-controlled
+## 1. Custody decision
 
-Option A (retailer-controlled Sui owner account) remains the stated production
-goal. It was not selected for the pilot because:
+**Decision: service-managed custody.** The Vendra server holds a Walrus owner key
+and signs memory writes itself. Each shop receives:
 
-- It requires wallet onboarding, signing and recovery education from grocery
-  retailers, which is a significant usability risk for the target user.
-- Wallet recovery is a security design problem that has no confirmed path in the
-  reviewed Walrus documentation. Shipping it would mean guessing.
+- its own Walrus Memory account reference, and
+- its own unique namespace derived from the shop id.
 
-Option C (embedded account with retailer-held recovery) has no confirmed
-onboarding or recovery path and was not built from guesswork.
+**Why.** A retailer running a provision shop has no Sui wallet, no gas budget and
+no interest in key management. Requiring a wallet at signup would put the
+hardest possible step first and would exclude the exact users the product is for.
+A per-shop account reference plus a per-shop namespace means one shop can never
+read another shop's memories even though the service holds the keys for all of
+them.
 
-Option B is permitted by `WALRUS_ACCOUNT_CUSTODY.md` for a controlled pilot
-provided isolation, key controls, revocation and deletion are addressed, the
-custody is disclosed, and only low-sensitivity data is accepted until deletion is
-verified. This document states exactly which of those are **verified** and which
-are **not**.
+**This is custodial, and it is disclosed as custodial.** The privacy notice and
+the in-app disclosure both state that the operator holds the keys and can
+compulsorily access stored memories. It is never described as retailer-owned or
+self-custodied. See [`WALRUS_ACCOUNT_CUSTODY.md`](../WALRUS_ACCOUNT_CUSTODY.md)
+for the full reasoning.
+
+### Consequence that cannot be softened
+
+Because the operator holds the keys, the operator's promise is the only thing
+standing between a retailer and compelled access. That is a real limitation, not
+a detail. The alternative — retailer-held keys — was rejected for the reasons
+above, and the trade-off is recorded rather than hidden.
 
 ---
 
-## 3. Verification matrix — the honest state
+## 2. What the adapter actually calls
 
-| Check | Required by spec | Status | Notes |
+The adapter in `web/src/lib/memory/walrus.ts` was written against the installed
+package's own type declarations, not against documentation or memory of the API.
+The interface read from `node_modules/@mysten-incubation/memwal` is:
+
+```
+MemWal.create(...)
+memwal.remember(...)
+memwal.getRememberStatus(...)
+memwal.recall(...)
+memwal.listNamespaces()
+```
+
+Those five methods are what the adapter uses, and nothing else. If the real SDK
+differs at runtime, the adapter fails loudly; it does not fall back to writing
+somewhere else and report success.
+
+---
+
+## 3. Verification matrix
+
+| Claim | Status | How it would be verified | Currently |
 |---|---|---|---|
-| Two isolated shop scopes exist | Yes | **Unverified** | Needs credentials; `tests/walrus-memory/` skips loudly |
-| Shop A cannot read Shop B's memories | Yes | **Unverified** | Test written, skips without credentials |
-| Shop A cannot read Shop B's evidence | Yes | **Verified by design** | Enforced in Postgres RLS + storage policy |
-| Server derives scope from session | Yes | **Verified** | `resolveShop`; covered by `tests/tenant-isolation/` |
-| No single global namespace | Yes | **Verified** | Unique index `shops_walrus_namespace_key`; namespace derived server-side with 8 random bytes |
-| Client cannot supply namespace | Yes | **Verified** | No client input reaches the namespace field at all |
-| Delegate key not in DB / browser / logs | Yes | **Verified** | Only a reference is stored; `tests/unit` covers the shape |
-| **Permanent blob erasure** | **Yes** | **NOT VERIFIED** | SDK has no delete method; Security Delete flow not exercised |
-| Delegate revocation runbook | Yes | **Documented, untested** | See §6 |
-| Real-user evidence (3 users × 10 memories) | Challenge | **Not gathered** | No users yet |
+| A memory write reaches Walrus | **UNVERIFIED** | Provision a live account, write one memory, confirm `getRememberStatus` reports it | No account |
+| A memory can be recalled | **UNVERIFIED** | `recall()` with a query whose answer is known | No account |
+| One namespace cannot return another shop's memories | **UNVERIFIED** | `tests/walrus-memory/isolation.test.ts` | **Skipped** |
+| Deleting a shop removes its memories | **BLOCKED — impossible** | — | See below |
+| The memory count shown to the retailer is real | **UNVERIFIED** | Compare `listNamespaces().memory_count` to a manual count | No account |
 
-**Two release gates remain closed.** Both are recorded as blockers in
-`SUBMISSION_PLAN.md` rather than worked around.
+The isolation test suite **skips loudly and prints why** when credentials are
+absent. It does not pass vacuously. A green test run with no credentials does
+**not** mean isolation is verified, and the README says so explicitly.
 
 ---
 
-## 4. SDK contract, verified against the installed package
+## 4. Permanent deletion is not possible, and the product says so
 
-`@mysten-incubation/memwal@0.1.8`, read from the installed `dist/*.d.ts` rather
-than assumed:
+The MemWal SDK exposes no production delete method. The only `forget` in the
+package is on `MemWalMock`, which is a mock.
+
+This has a direct consequence that the application does not soften:
+
+- `POST /api/privacy/erase` **does** delete everything Vendra controls: the
+  Postgres rows, the private Storage objects, and the auth account.
+- It reports the Walrus Memory layer as **`blocked`**, never as `complete`.
+
+A retailer who erases their data is therefore told, in the response and in the
+UI, that one layer could not be deleted and why. Silently reporting success here
+would be the single most dishonest thing this application could do, because the
+retailer's belief that their data is gone would be false.
+
+This is recorded in `docs/privacy-and-data-flow.md` and in the `/privacy` page.
+
+---
+
+## 5. What is needed to close this out
+
+1. **The Walrus Memory package id** for the target Sui network.
+2. **The AccountRegistry shared object id** for that network.
+3. A funded Sui testnet wallet to pay for the account-creation transaction.
+
+With those, provisioning uses the SDK's own account entry point:
 
 ```ts
-MemWal.create({ key, accountId, serverUrl?, namespace? })
-
-remember(text, namespace?, { idempotencyKey? })
-  → { job_id, status }
-
-getRememberStatus(jobId)
-  → { status: pending | running | uploaded | done | failed | not_found,
-      blob_id?, error? }
-
-recall({ query, limit?, namespace?, maxDistance?, maxTokens?, sort? })
-  → { results: [{ blob_id, text, distance, created_at? }], total, meta? }
-
-listNamespaces({ cursor?, limit? })
-  → { namespaces: [{ name, memory_count, storage_used, updated_at }], ... }
+import { createAccount, addDelegateKey } from '@mysten-incubation/memwal/account';
 ```
 
-Notable, and used deliberately:
-
-- **`listNamespaces().memory_count`** is the only honest, provider-reported
-  measure of stored memories. It is what the settings screen shows. A local
-  counter would be a fabricated number, so none is used.
-- **There is no `forget` / delete method.** This confirms the gap recorded in
-  `TECH_DECISIONS.md` against issue #1043.
-- `maxTokens` is passed to `recall` so a large recall cannot blow the model
-  context.
-- `sort: 'recent'` makes newest-wins deterministic, which matters when a
-  correction supersedes an earlier fact.
+Those two ids are not published on a credentials page the way a database key is.
+They are deployment parameters of the Walrus Memory contracts on a specific
+network, and they have deliberately **not been guessed**. A wrong id produces a
+transaction that either fails or, worse, succeeds against the wrong contract.
 
 ---
 
-## 5. What is written
+## 6. Why the application still works without any of this
 
-One short, atomic statement per confirmed event:
+Walrus Memory is the cross-session recall layer. It is not the system of record.
 
-```
-On 2026-03-04, deal <deal-uuid> with Okonkwo Wholesale recorded agreed terms:
-Agreed 18 cartons at 18,000 naira per carton. Source event: <event-uuid>.
-```
+- Confirmed deal events save to Postgres first. That write is authoritative.
+- A `walrus_memory_sync` row is inserted **before** the network call, so a crash
+  between the two cannot lose the fact that a memory was owed.
+- If the write fails, the row records the failure and the shop's memory status
+  shows as unavailable.
+- Ask Vendra then falls back to searching the retailer's real Postgres records and
+  says plainly that deal memory is unavailable.
 
-Included: date, event type, shop-local supplier label, opaque `deal_id` and
-`event_id`.
-
-**Never included:** phone numbers, file names, signed URLs, bank details,
-conversation transcripts, or any unconfirmed model output.
-
-`composeMemoryText` is covered by unit tests, including that whitespace is
-collapsed and length is bounded, so a memory statement stays short and
-traceable.
-
----
-
-## 6. Key handling
-
-| Rule | Implementation |
-|---|---|
-| Never in the database | Only `shops.walrus_delegate_key_ref`, a pointer |
-| Never in the browser | The adapter is server-only; `serverExternalPackages` enforces it |
-| Never in logs | Errors log a short code, never the key or memory text |
-| Never in source control | `.gitignore` excludes `.env*` and stray `*.key` / `*.pem` |
-| Rotation | Change the key in the key store, update the reference, re-run `POST /api/shops/:id/memory` |
-| Revocation | Remove the delegate from the Walrus account; the app then fails closed and reports memory as unavailable rather than silently succeeding |
-
----
-
-## 7. Honest degradation
-
-Every failure mode degrades to something true rather than something convenient.
-
-| Failure | What the user sees |
-|---|---|
-| Walrus not configured | Deal saves. Memory row recorded as pending. Ask Vendra: "Deal memory is not connected in this environment." |
-| Write fails | Deal saved. Memory shows "Memory needs attention". Retry available. A failed write never rolls back the deal. |
-| Recall fails | "Deal memory is temporarily unavailable. Your saved deals are still in the Deals list." Plus a direct search of real records. |
-| No model key | Deterministic summary of real records, labelled as not a model answer. |
-| Recall returns untraceable memories | All discarded. Answer: "I couldn't find a saved record for that." |
-
-The deal record is never lost to a memory failure. That is the single most
-important failure-mode decision in the integration.
-
----
-
-## 8. What must happen before a real pilot
-
-1. Supply Walrus credentials and run `tests/walrus-memory/`. Do not proceed until
-   namespace isolation passes.
-2. Obtain the delegate public key registration and confirm revocation works.
-3. Exercise the wallet-authenticated Security Delete flow against a disposable
-   blob and verify the blob is unreachable through the supported read path.
-4. Only then accept real retailer data.
-5. If (3) cannot be completed, keep the pilot to deliberately low-sensitivity
-   records and keep saying so in the UI — which the current copy already does.
+So the product is usable and honest today. What it cannot yet do is recall across
+sessions from the memory layer specifically. That capability is claimed nowhere.

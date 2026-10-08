@@ -14,107 +14,116 @@ bundle, a marketplace or a POS.
 
 ## Current status
 
-Read this section before anything else. **The application is fully implemented,
-built and tested. It is not yet connected to live services**, because the
-credentials below require manual account creation that has not been done yet.
+Read this section before anything else. **The application is built, connected to
+a live database, and verified end to end.** What remains is deployment, Walrus
+Memory credentials, and real user evidence.
 
 | Area | State |
 |---|---|
-| Database schema, migrations, RLS, private storage | Written and complete |
-| Server API (all 19 routes in `DATA_API_CONTRACTS.md` §5) | Written and complete |
-| Landing page, auth, onboarding, all 8 authenticated routes | Written, built, browser-verified |
-| Deal lifecycle: quote → terms → delivery → issue → resolution | Written and complete |
-| Walrus Memory adapter (real SDK `@mysten-incubation/memwal` 0.1.8) | Written and complete |
-| Grounded recall + follow-up drafting (Gemini) | Written and complete |
-| Unit tests | 76 passing |
-| Tenant-isolation and Walrus-isolation tests | Written; **skip loudly** without credentials |
+| Database schema, migrations, RLS, private storage | **Applied to the live Supabase project** (`tdegxxqxrhbtmqcqfwls`, eu-west-2) |
+| Server API (all routes in `DATA_API_CONTRACTS.md` §5) | Complete, exercised live |
+| Landing page, auth, onboarding, 8 authenticated routes | Complete, browser-verified |
+| Deal lifecycle: quote → terms → delivery → issue → resolution | Complete, verified live |
+| Grounded recall + follow-up drafting (Gemini `gemini-3.8-flash`) | **Verified live with real model output** |
+| Walrus Memory adapter (real SDK `@mysten-incubation/memwal` 0.1.8) | Written; **needs credentials** |
 | `tsc --noEmit`, `eslint`, `next build` | All clean |
-| Lighthouse (a11y / best practices / SEO) on `/`, `/sign-in`, `/privacy`, `/onboarding` | 1.00 / 1.00 / 1.00 |
-| Live Supabase project | **Not created — manual action required** |
-| Live Gemini key | **Not supplied — manual action required** |
-| Walrus delegate credentials | **Not supplied — manual action required** |
-| Deployment to Vercel | **Blocked: no Vercel account on this machine** |
+| Unit tests | **76 passing** |
+| Tenant-isolation suite | **13 passing against the live database** |
+| End-to-end journey test | **19/19 passing against live Supabase + live Gemini** |
+| Lighthouse (a11y / best practices / SEO) | 1.00 / 1.00 / 1.00 |
+| Vercel deployment | **Blocked: no Vercel account on this machine** |
+| Walrus namespace isolation and erasure | **Unverified — reported as unverified, not as a pass** |
+| Real user evidence (3 users × 10 memories) | **Not gathered. No users yet.** |
 
 **No claim in this repository is made about usage, memory counts, testimonials
 or challenge completion.** There are no real users yet.
+
+### What the live end-to-end test actually proved
+
+Driving the real routes against the real database and the real model:
+
+```
+create account ..........  PASS
+create shop .............  PASS   own memory scope assigned
+add supplier ............  PASS
+capture deal ............  PASS   status = agreed
+read deal back ..........  PASS   1 line, 2 events
+record delivery (short) .  PASS   status auto-derived to part_delivered
+log issue ...............  PASS   status -> issue_open
+record resolution .......  PASS   status -> resolved
+ask (grounded recall) ...  PASS   5 sources cited
+answer cites sources ....  PASS
+answer has right price .  PASS   stated 18,000 NGN
+no invented receipt ....  PASS
+negative control ........  PASS   refused an unknown supplier
+draft follow-up .........  PASS   quoted the real price and shortfall
+cross-shop leak check ...  PASS   shop B received nothing from shop A
+```
+
+Two behaviours are worth calling out. The deal status is **derived** from the
+recorded quantities rather than asserted by the client, so "part delivered"
+appeared on its own. And the negative control is the important one: asked about
+a supplier that was never recorded, Vendra said no saved record was found rather
+than inventing one.
 
 ---
 
 ## Required manual setup
 
-These are genuinely blocked, not skipped. Each is short.
+### 1. Gemini — done ✅
 
-### 1. Supabase project (blocking everything)
+The key works. `gemini-2.5-flash` and `gemini-2.0-flash` are both **retired**
+for this key and return 404. Vendra is pinned to **`gemini-3.8-flash`**, verified
+live.
 
-Docker is not installed on this machine, so a local Supabase stack cannot run,
-and the Supabase CLI is authenticated to an unrelated organisation
-("Homeplug Org") which must not be used. Create a project manually:
+### 2. Supabase — done ✅
 
-1. Create a project at <https://supabase.com/dashboard>, named `Vendra`.
-2. Note the **project ref** and the **region**.
-3. Copy from **Project Settings → API**: `Project URL`, `anon` public key,
-   `service_role` key.
-4. Fill them into `web/.env.local`:
+Project `Vendra`, ref `tdegxxqxrhbtmqcqfwls`, org `psycho zone`, eu-west-2.
+Migrations applied with `supabase db push`. To re-apply:
 
-   ```bash
-   NEXT_PUBLIC_SUPABASE_URL=https://<project-ref>.supabase.co
-   NEXT_PUBLIC_SUPABASE_ANON_KEY=<anon key>
-   SUPABASE_SERVICE_ROLE_KEY=<service_role key>
-   ```
+```bash
+cd supabase
+supabase link --project-ref tdegxxqxrhbtmqcqfwls
+supabase db push
+```
 
-5. Apply the migrations:
+The project was created with "Automatically expose new tables" **disabled** and
+"Enable automatic RLS" **enabled**. That is why migration
+`20261007000006_service_role_grants.sql` exists: with auto-exposure off, new
+tables receive no grants at all, including to `service_role`.
 
-   ```bash
-   cd supabase
-   supabase link --project-ref <project-ref>
-   supabase db push
-   ```
+### 3. Vercel — blocking deployment
 
-   This creates the tables, Row Level Security policies, the private
-   `evidence` storage bucket and its policies. There is no seed data: Vendra
-   seeds nothing, because seeding would fabricate the very evidence this project
-   is required to produce honestly.
-
-### 2. Google Gemini key
-
-1. Create a key at <https://aistudio.google.com/apikey>.
-2. Set `GOOGLE_GENERATIVE_AI_API_KEY` in `web/.env.local`.
-3. Confirm the model id. The default is `gemini-2.5-flash`; check the current
-   catalogue and pricing at <https://ai.google.dev/gemini-api/docs/pricing>
-   before pinning `GOOGLE_MODEL_ID`.
-
-**Without this key the application still works.** Ask Vendra falls back to a
-deterministic summary of the retailer's own saved records and labels it as not a
-model answer. It never invents a fact.
-
-### 3. Walrus Memory delegate credentials
-
-Vendra uses **service-managed** custody: the server holds the Walrus owner key
-and each shop gets its own account reference and its own unique namespace. This
-is chosen and justified in [`WALRUS_ACCOUNT_CUSTODY.md`](WALRUS_ACCOUNT_CUSTODY.md)
-and disclosed in the UI.
-
-To enable live memory you need a funded testnet Sui account and a registered
-Ed25519 delegate key, then set `WALRUS_MEMORY_ACCOUNT_ID`,
-`WALRUS_READER_CREDENTIAL` and `WALRUS_DELEGATE_PRIVATE_KEY`.
-
-**Without these the application still works.** Confirmed deal events save to
-Postgres, a `walrus_memory_sync` row records the pending write, and Ask Vendra
-reports that deal memory is unavailable. Nothing is ever reported as remembered
-that was not.
-
-### 4. Vercel account (blocking deployment)
-
-The Vercel CLI is installed but **not authenticated**, and no token exists on
-this machine. Run `vercel login`, then:
+The Vercel CLI is installed but **not authenticated** and no token exists on this
+machine. Run `vercel login` in your own terminal, then:
 
 ```bash
 cd web
 vercel --prod
 ```
 
-Set the same environment variables in the Vercel project's environment settings.
+Set in the Vercel project settings: `NEXT_PUBLIC_SUPABASE_URL`,
+`NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`,
+`GOOGLE_GENERATIVE_AI_API_KEY`, `GOOGLE_MODEL_ID`, `NEXT_PUBLIC_SITE_URL`.
 
+### 4. Walrus Memory — needed for cross-session recall
+
+Vendra uses **service-managed** custody: the server holds the Walrus owner key
+and each shop gets its own account reference and unique namespace. This is
+chosen and justified in [`WALRUS_ACCOUNT_CUSTODY.md`](WALRUS_ACCOUNT_CUSTODY.md)
+and disclosed in the UI.
+
+A funded Sui testnet wallet now exists. Creating the Walrus Memory account object
+additionally needs the Walrus Memory package id and the AccountRegistry shared
+object id for the target network. Those are **not** published as a simple
+credential page, and they have deliberately not been guessed. Provisioning will
+use the SDK's own `@mysten-incubation/memwal/account` entry point
+(`createAccount`, `addDelegateKey`) once those two values are confirmed.
+
+**Until then the application still works.** Confirmed deal events save to
+Postgres, a `walrus_memory_sync` row records the pending write, and Ask Vendra
+says memory is unavailable and falls back to searching the retailer's real
+records. Nothing is reported as remembered that was not.
 ---
 
 ## Running locally
@@ -130,10 +139,13 @@ npm run dev                     # http://localhost:3000
 Verify the build:
 
 ```bash
-npx tsc --noEmit        # types
-npx eslint .            # lint
-npm run build           # production build
-npx vitest run          # tests
+npm run typecheck      # types
+npm run lint           # lint
+npm run build          # production build
+npm test               # all vitest suites
+npm run test:unit      # unit suites only, no credentials needed
+npm run test:isolation # cross-shop isolation against the live database
+npm run test:e2e       # full journey against live Supabase + Gemini (needs `npm run dev`)
 ```
 
 ### What the test suites mean
@@ -141,12 +153,13 @@ npx vitest run          # tests
 | Suite | Runs without credentials | Meaning |
 |---|---|---|
 | `tests/unit/` | Yes | 76 tests over validation, grounding, memory statements, permissions, rate limits |
-| `tests/tenant-isolation/` | **No — skips loudly** | Proves one shop cannot read or write another shop's rows through the REST API |
-| `tests/walrus-memory/` | **No — skips loudly** | Proves one namespace cannot return another shop's memories |
+| `tests/tenant-isolation/` | Needs Supabase keys | Proves one shop cannot read or write another shop's rows through the REST API. **13 tests, currently passing.** |
+| `tests/walrus-memory/` | Needs Walrus credentials | Proves one namespace cannot return another shop's memories. **Currently skipping.** |
+| `scripts/e2e-smoke.mjs` | Needs Supabase + Gemini | Drives the whole journey over HTTP and asserts the answer is grounded. **19/19 passing.** |
 
-A green run with no credentials **does not mean isolation is verified**. Both
-suites print an explicit skip reason to the console. This is deliberate: an
-unverified security guarantee must never look like a pass.
+A green run with no credentials **does not mean isolation is verified**. The
+Walrus suite prints an explicit skip reason to the console. This is deliberate:
+an unverified security guarantee must never look like a pass.
 
 ---
 

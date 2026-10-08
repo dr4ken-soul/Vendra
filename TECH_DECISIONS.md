@@ -1,13 +1,13 @@
 # Vendra Technical Decisions and Open Questions
 
-**Status:** Implementation complete. Decisions below are recorded as implemented, with the remaining gates stated explicitly.  
+**Status:** Implementation complete and verified against live services. Decisions below are recorded as implemented, with the remaining gates stated explicitly.  
 **Last reviewed:** 8 October 2026
 
 ## 0. Implementation outcome
 
-The application is built: Next.js 16 App Router, TypeScript, Tailwind v4, Motion, Supabase Auth + Postgres with RLS + private Storage, the Walrus Memory adapter, and grounded Gemini recall. `tsc`, `eslint`, `next build` and 76 unit tests are green, and the four public routes score 1.00 on Lighthouse accessibility, best practices and SEO.
+The application is built and running against a live Supabase project and the live Gemini model. Next.js 16 App Router, TypeScript, Tailwind v4, Motion, Supabase Auth + Postgres with RLS + private Storage, the Walrus Memory adapter, and grounded Gemini recall. `tsc`, `eslint` and `next build` are clean; 76 unit tests, 13 live tenant-isolation tests and a 19-step live end-to-end journey all pass.
 
-What is **not** done, and is claimed nowhere: live credentials, live Walrus isolation verification, verified permanent erasure, real users, and deployment. See `README.md` → *Required manual setup* and `SUBMISSION_PLAN.md`.
+What is **not** done, and is claimed nowhere: Walrus namespace isolation verification, verified permanent erasure, real users, and deployment. See `README.md` and `SUBMISSION_PLAN.md`.
 
 ## 0a. Custody decision record
 
@@ -29,14 +29,62 @@ Completed as required by `WALRUS_ACCOUNT_CUSTODY.md` §7.
 |---|---|---|
 | Next.js Cache Components | Disabled | Every authenticated route reads the session cookie and derives shop scope server-side, so each would additionally need a Suspense boundary around the cookie read with no caching benefit. Nothing tenant-scoped is prerendered either way. |
 | Auth method | Email + password with confirmation; no provider chooser | One configured method, per `FRONTEND_SPEC.md` §4.4. No wallet is required to create a Vendra login. |
+| Model | **`gemini-3.8-flash`** | `gemini-2.5-flash` and `gemini-2.0-flash` both return 404 "no longer available" for the supplied key. Verified live on 8 October 2026. |
+| Model output budget | `maxOutputTokens: 2000`, `thinkingBudget: 512` | Gemini 3.x reasons before answering and thinking tokens share the output budget. At the original 400-token budget the visible answer was truncated mid-sentence ("...you agreed to pay 18"). Found by the live E2E test, not by review. |
 | Memory write path | `walrus_memory_sync` row inserted **before** the network call | A crash between the two cannot silently lose the fact that a memory was owed. |
 | Memory count | Read from `listNamespaces().memory_count` | The only provider-reported measure. A local counter would be a fabricated number. |
-| Deal status | Derived from recorded events, with a database constraint | A client cannot assert `resolved` with no resolution event. Prevents client state from becoming source of truth. |
+| Deal status | Derived from recorded events, with a database constraint | A client cannot assert `resolved` with no resolution event. Verified live: recording 16 of 18 cartons produced `part_delivered` with no status sent by the client. |
 | Deletion reporting | Tracked per data class | A layer that cannot be verified is reported as blocked, never counted as done. |
 | Navigation morph | CSS transition rather than Motion `layout` | Motion's `layout` sets `position: relative`, detaching the fixed pill from the viewport. Verified fixed in-browser after the fix. |
 | `formatMoney` signature | Dropped the time-zone parameter | Currency formatting is not date-bound; the parameter was misleading. |
 | Supabase storage verification | `storage.info()` before recording metadata | Verifies the object exists and its real size instead of trusting the client. |
+| Shop creation | Server-generated id, inserted without `return=representation` | See 0c. |
 
+## 0c. Defects found only by running against the live database
+
+Six defects passed review, type-checking, linting and the production build. All
+were found by executing the real application against real services. They are
+recorded here as the argument for live verification over static confidence.
+
+| # | Defect | Symptom | Fix |
+|---|---|---|---|
+| 1 | Composite FK referenced a unique constraint declared later in the same file | `db push` failed: *no unique constraint matching given keys for referenced table "suppliers"* | Moved `suppliers (id, shop_id)` unique above `create table deals` |
+| 2 | An earlier edit orphaned three `evidence_files` columns, and an index referenced a non-existent `created_at` | `syntax error at or near "extraction_status"` | Restored the columns; renamed the index to use `uploaded_at` |
+| 3 | `service_role` had no grants | `permission denied for table shops` | Migration `0006`. With "Automatically expose new tables" disabled, new tables get **no** grants at all, including to `service_role`. |
+| 4 | `insert().select()` on `shops` also evaluated the UPDATE policy | Shop creation failed with an RLS error naming `shops`, even though both INSERT policies passed | Shop id is now generated server-side and inserted without requesting the returned row |
+| 5 | Owner could not create their own first membership | `new row violates row-level security policy for table "shop_memberships"` | `memberships_insert_self_owner`, backed by a `SECURITY DEFINER` helper |
+| 6 | `audit_events` had a SELECT policy but no INSERT policy | Every audited action failed and rolled back the operation it recorded | Migration `0016` adds `audit_events_insert` |
+
+**Defect 5 has a subtlety worth recording.** The first attempt used
+`exists (select 1 from public.shops ...)` and *still* failed, because a subquery
+inside a Row Level Security policy is itself filtered by that table's policies:
+`shops_select_member` hides every shop the caller has not yet joined, so the
+owner could not see the shop they had just created. The working fix is
+`public.is_registered_shop_owner(shop_id)`, a `SECURITY DEFINER` function that
+reads `shops` with the privileges of its owner and therefore bypasses the
+caller's RLS. It grants nothing on its own; the policy combines it with the role
+and user checks.
+
+**Defect 4 is the same class of surprise.** `Prefer: return=representation`, which
+`insert().select()` sends, makes PostgREST evaluate the table's UPDATE path as
+well. The `shops` UPDATE policy requires `settings.manage` in the shop, which
+cannot be true for a shop that does not exist yet — so the insert was rejected by
+a policy that had nothing to do with inserting.
+
+## 0d. Verification state after the live run
+
+| Check | Result |
+|---|---|
+| Migrations applied to the live project | Clean |
+| Tenant isolation, live database | **13/13 passing** |
+| End-to-end journey, live database + live Gemini | **19/19 passing** |
+| Grounding: correct price, correct shortfall, citations | Verified |
+| Negative control: refuses an unknown supplier | Verified |
+| Cross-tenant leak through the API | None found |
+| Unit tests | 76 passing |
+| `tsc`, `eslint`, `next build` | Clean |
+| Walrus namespace isolation | **Unverified — no credentials** |
+| Permanent erasure | **Unverified — the SDK has no delete method** |
 ## Accepted direction
 
 | Area | Decision | Reason / boundary |
