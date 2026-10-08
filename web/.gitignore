@@ -42,3 +42,8 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+# Vercel CLI local state (project link) and local environment overrides.
+# .env.example is tracked, so the negation mirrors the root .gitignore.
+.vercel
+.env*
+!.env.example

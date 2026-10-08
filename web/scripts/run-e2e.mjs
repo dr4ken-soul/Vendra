@@ -1,9 +1,16 @@
-// Load .env.local into process.env, then run the end-to-end smoke test.
+// Load .env.local into process.env, then run an end-to-end journey test.
 //
 // The test drives the real application over HTTP against the real Supabase
 // project and the real Gemini model. Nothing is mocked.
 //
-//   cd web && npm run test:e2e   (with `npm run dev` running)
+// Local (needs `npm run dev` running):
+//
+//   cd web && npm run test:e2e
+//
+// Against a deployment (proves the production build and the platform env vars):
+//
+//   cd web && npm run test:e2e:prod
+//   E2E_BASE_URL=https://your-deployment.vercel.app npm run test:e2e:prod
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -35,8 +42,15 @@ for (const line of raw.split('\n')) {
 
 console.log(`Loaded ${loaded} variables from .env.local`);
 
+// E2E_BASE_URL selects the target. Without it the test runs against the local
+// dev server; with it, against a deployment.
+const target = process.env.E2E_BASE_URL?.trim();
+const scenario = target ? './e2e-prod.mjs' : './e2e-smoke.mjs';
+
+console.log(target ? `target: ${target} (deployed build)` : 'target: http://localhost:3000 (local dev)');
+
 // The test reads the env file relative to the web root.
 process.chdir(webRoot);
 
 // Importing runs the scenario; it calls process.exit when finished.
-await import('./e2e-smoke.mjs');
+await import(scenario);

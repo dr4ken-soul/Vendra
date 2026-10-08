@@ -328,8 +328,6 @@ const negative = await api('/api/assistant/recall', {
     question: 'What did I agree to pay Beta Frozen Foods for the last delivery?',
   }),
 });
-const negativeText = (negative.body?.answer ?? '').toLowerCase();
-
 /**
  * What must be true after asking about a supplier that was never recorded.
  *

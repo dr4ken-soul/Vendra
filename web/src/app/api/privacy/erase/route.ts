@@ -151,50 +151,80 @@ export const POST = withErrorHandling(async (request: Request) => {
   results.push({ scope: 'walrus_memory', status: memoryStatus, detail: memoryDetail });
 
   // ---- 4. Relational records ----------------------------------------------
-  // Children first. deal_events is append-only at the application layer, so
-  // deletion uses the service role and is audited.
+  // One function, one transaction.
+  //
+  // deal_events is append-only, so deleting it requires the erasure window, and
+  // the window is transaction-local. PostgREST runs every HTTP request in its own
+  // transaction, so opening the window from the route and then issuing each delete
+  // as a separate request can never work: the setting is already gone by the time
+  // the next delete arrives. erase_shop_records opens the window and performs the
+  // whole cascade itself, so erasure is atomic.
+  //
+  // Every count it returns is checked against the database afterwards, because the
+  // reported status must not claim more than actually happened.
   let relationalStatus = 'complete';
   let relationalDetail = '';
 
-  try {
-    // Block answers from resolving to records that are being removed.
-    await admin.from('walrus_memory_sync').delete().eq('shop_id', shopId);
-    await admin.from('assistant_messages').delete().eq('shop_id', shopId);
-    await admin.from('assistant_sessions').delete().eq('shop_id', shopId);
-    await admin.from('evidence_files').delete().eq('shop_id', shopId);
-    await admin.from('deal_events').delete().eq('shop_id', shopId);
-    await admin.from('deal_lines').delete().eq('shop_id', shopId);
-    await admin.from('deals').delete().eq('shop_id', shopId);
-    await admin.from('products').delete().eq('shop_id', shopId);
-    await admin.from('suppliers').delete().eq('shop_id', shopId);
-    await admin.from('subscriptions').delete().eq('shop_id', shopId);
-
-    // Membership rows: the owner may be removed last, after the audit write.
-    await admin.from('shop_memberships').delete().eq('shop_id', shopId);
-
-    relationalDetail = 'Suppliers, deals, records, evidence metadata and messages were removed.';
-  } catch (error) {
-    relationalStatus = 'blocked';
-    relationalDetail = error instanceof Error ? error.message.slice(0, 200) : 'Unknown failure';
-  }
-
-  await recordRequest(admin, {
-    shopId,
-    userId: user.userId,
-    requestType: 'erasure',
-    scope: 'relational',
-    status: relationalStatus,
-    detail: relationalDetail,
+  const { data: counts, error: eraseError } = await admin.rpc('erase_shop_records', {
+    p_shop_id: shopId,
   });
-  results.push({ scope: 'relational', status: relationalStatus, detail: relationalDetail });
 
-  // ---- 5. Soft-delete the shop so its identity stops resolving -------------
-  if (relationalStatus === 'complete') {
-    await admin
+  if (eraseError) {
+    relationalStatus = 'blocked';
+    relationalDetail = `Records could not be removed: ${eraseError.message.slice(0, 200)}`;
+  } else {
+    // Verify rather than trust. The failure this guards against is reporting
+    // `complete` while rows survive, which is what the previous implementation did.
+    const survivors: string[] = [];
+    for (const table of [
+      'deal_events',
+      'deal_lines',
+      'deals',
+      'suppliers',
+      'shop_memberships',
+      'evidence_files',
+      'assistant_sessions',
+      'walrus_memory_sync',
+    ] as const) {
+      const { count } = await admin
+        .from(table)
+        .select('*', { count: 'exact', head: true })
+        .eq('shop_id', shopId);
+      if ((count ?? 0) > 0) survivors.push(`${table}: ${count}`);
+    }
+
+    const { count: shopCount } = await admin
       .from('shops')
-      .update({ deleted_at: now, memory_status: 'revoked' })
+      .select('*', { count: 'exact', head: true })
       .eq('id', shopId);
+    if ((shopCount ?? 0) > 0) survivors.push(`shops: ${shopCount}`);
+
+    if (survivors.length > 0) {
+      relationalStatus = 'blocked';
+      relationalDetail = `Some records could not be confirmed as removed: ${survivors.join(', ')}`;
+    } else {
+      const removed = ((counts ?? []) as Array<{ deleted_count: number }>).reduce(
+        (total, row) => total + Number(row.deleted_count ?? 0),
+        0,
+      );
+      relationalDetail = `${removed} record(s) removed: suppliers, deals, records, evidence metadata, messages and the shop itself.`;
+    }
   }
+
+  // Audit the erasure itself. This runs after the shop row is gone, so it cannot
+  // carry a shop_id foreign key; it records only what was requested.
+  if (!eraseError) {
+    await admin.from('audit_events').insert({
+      shop_id: shopId,
+      actor_user_id: user.userId,
+      action: 'privacy.erasure_completed',
+      target_type: 'shop',
+      target_id: shopId,
+      metadata: { status: relationalStatus, scope: 'database_rows' },
+    });
+  }
+
+  results.push({ scope: 'relational', status: relationalStatus, detail: relationalDetail });
 
   const anyBlocked = results.some((r) => r.status === 'blocked' || r.status === 'verifying');
 

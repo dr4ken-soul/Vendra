@@ -71,6 +71,24 @@ well. The `shops` UPDATE policy requires `settings.manage` in the shop, which
 cannot be true for a shop that does not exist yet — so the insert was rejected by
 a policy that had nothing to do with inserting.
 
+Found by writing a test that asked whether erasure actually works, rather than
+assuming it did. All five passed review, type-checking, linting and the production
+build. Defects 1–6 are in the table above; these are 7–11.
+
+| # | Defect | Consequence | Fix |
+|---|---|---|---|
+| 7 | `deny_event_mutation` refused **every** `deal_events` delete, including the service role. `POST /api/privacy/erase` called that delete and never checked the result. | Erasure deleted nothing and reported the relational layer as `complete`. The cascade from `shops` failed too, so a shop with any recorded event could not be deleted at all. | Migration `0007` adds a transaction-scoped erasure window; the route now checks every delete and reports `blocked` on any failure. |
+| 8 | The window was opened with one HTTP request and used by later ones. | Never worked. PostgREST runs each request in its own transaction, so a transaction-local setting is gone before the next delete arrives. | Migration `0009` moves the whole cascade into `erase_shop_records`, one function, one transaction. Erasure is now atomic. |
+| 9 | The route used `current_user` to check the calling role. | Inside `SECURITY DEFINER` that is the *function owner*, so the guard rejected every legitimate call. Erasure was permanently broken. | Migration `0010` tried `session_user`, which on Supabase is always `authenticator`. Migration `0011` settles on `current_setting('role')`, which PostgREST sets from the API key and `SECURITY DEFINER` does not change. |
+| 10 | `deal_events_no_update` had the condition `old.summary = new.summary`. | **Inverted.** The trigger fired when a summary was *unchanged* and stayed silent when it was *rewritten*, so the service role could silently overwrite recorded evidence. Exactly the "hallucinated supplier fact" risk `PRIVACY_SECURITY.md` §6 is about. | Migration `0008` fires on `old.summary is distinct from new.summary`. |
+| 11 | A migration assertion of mine read `not exists (... has_function_privilege('anon' ...))` and raised "anon must not be able to call". | The assertion fired precisely when the grant was correctly *absent*, so the migration could not apply. | Inverted to `exists`. A migration that cannot apply is at least a loud failure, but the message blamed the wrong thing. |
+
+The order of discovery is the point. Defect 7 was the serious one and it was
+invisible: no test exercised erasure, the route's happy path returned HTTP 200,
+and the response body said the data was gone. Fixing 7 honestly — reporting
+`blocked` — is what made 8, 9 and 10 visible, because the route started reporting
+a real failure instead of a false success.
+
 ## 0d. Verification state after the live run
 
 | Check | Result |
@@ -78,13 +96,15 @@ a policy that had nothing to do with inserting.
 | Migrations applied to the live project | Clean |
 | Tenant isolation, live database | **13/13 passing** |
 | End-to-end journey, live database + live Gemini | **19/19 passing** |
+| End-to-end journey, deployed build on Vercel | **23/23 passing** |
 | Grounding: correct price, correct shortfall, citations | Verified |
 | Negative control: refuses an unknown supplier | Verified |
 | Cross-tenant leak through the API | None found |
-| Unit tests | 76 passing |
+| Unit and integration tests | 90 passing, 6 skipped (Walrus has no credentials) |
 | `tsc`, `eslint`, `next build` | Clean |
 | Walrus namespace isolation | **Unverified — no credentials** |
-| Permanent erasure | **Unverified — the SDK has no delete method** |
+| Privacy erasure, database rows | **Verified — `tests/privacy-erasure/` passes** |
+| Privacy erasure, Walrus blobs | **Unverified — the SDK has no delete method** |
 ## Accepted direction
 
 | Area | Decision | Reason / boundary |

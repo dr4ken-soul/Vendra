@@ -11,7 +11,16 @@
     "test": "vitest run --config vitest.config.ts",
     "test:unit": "vitest run --config vitest.config.ts tests/unit",
     "test:isolation": "vitest run --config vitest.config.ts tests/tenant-isolation",
-    "test:e2e": "node scripts/run-e2e.mjs"
+    "test:e2e": "node scripts/run-e2e.mjs",
+    "test:e2e:prod": "node scripts/run-e2e.mjs",
+    "test:erasure": "vitest run --config vitest.config.ts ../tests/privacy-erasure",
+    "verify:clean": "node scripts/verify-clean.mjs",
+    "clean:test": "node scripts/clean-test-data.mjs",
+    "auth:list": "node scripts/list-auth-users.mjs",
+    "user:create": "node scripts/create-confirmed-user.mjs",
+    "deploy": "vercel --prod",
+    "env:push": "node scripts/push-env-to-vercel.mjs",
+    "env:push:dry": "node scripts/push-env-to-vercel.mjs --dry-run"
   },
   "dependencies": {
     "@ai-sdk/google": "^4.0.90",
