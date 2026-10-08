@@ -13,8 +13,19 @@
 # Any stray key material, regardless of extension.
 *.pem
 *.key
-*service_role*
-*delegate*private*
+*.p12
+*.keystore
+
+# Credentials must never be committed. These match the *content* of a file, so
+# they catch a key pasted into an unexpected place, while still allowing a
+# legitimately named source file such as
+# supabase/migrations/*_service_role_grants.sql to be tracked.
+service_role_key=
+service_role=
+SUPABASE_SERVICE_ROLE_KEY=[A-Za-z0-9._-]+
+suiprivkey1
+GOOGLE_GENERATIVE_AI_API_KEY=[A-Za-z0-9._-]{20,}
+WALRUS_DELEGATE_PRIVATE_KEY=[A-Za-z0-9._-]{8,}
 
 # ---------------------------------------------------------------------------
 # Dependencies

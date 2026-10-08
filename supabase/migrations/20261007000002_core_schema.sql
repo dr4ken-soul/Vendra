@@ -109,6 +109,12 @@ create table public.suppliers (
 
 create index suppliers_shop_created_idx on public.suppliers (shop_id, created_at desc);
 
+-- Composite key proving a supplier belongs to a given shop. Declared here,
+-- before any child table references it, because Postgres requires the unique
+-- constraint to already exist when the composite foreign key is created.
+alter table public.suppliers
+  add constraint suppliers_id_shop_key unique (id, shop_id);
+
 -- ---------------------------------------------------------------------------
 -- products (shop-local labels only; no global catalogue in V1)
 -- ---------------------------------------------------------------------------
@@ -158,8 +164,6 @@ create table public.deals (
     foreign key (supplier_id, shop_id)
     references public.suppliers (id, shop_id)
 );
-
-alter table public.suppliers add constraint suppliers_id_shop_key unique (id, shop_id);
 
 comment on column public.deals.currency_code is
   'Required on every deal so that a later price can never be silently converted between currencies.';
@@ -278,6 +282,13 @@ create table public.evidence_files (
   uploaded_by uuid not null references auth.users (id) on delete restrict,
   uploaded_at timestamptz not null default now(),
 
+  extraction_status public.evidence_extraction_status not null default 'not_requested',
+  -- Reviewed text only. Raw unreviewed extraction is never stored.
+  extracted_text_redacted text check (extracted_text_redacted is null or char_length(extracted_text_redacted) <= 8000),
+
+  deleted_at timestamptz,
+  deleted_object_confirmed_at timestamptz,
+
   constraint evidence_files_deal_same_shop_fk
     foreign key (deal_id, shop_id)
     references public.deals (id, shop_id) on delete cascade,
@@ -286,18 +297,10 @@ create table public.evidence_files (
     references public.deal_events (id, shop_id) on delete set null
 );
 
-  extraction_status public.evidence_extraction_status not null default 'not_requested',
-  -- Reviewed text only. Raw unreviewed extraction is never stored.
-  extracted_text_redacted text check (extracted_text_redacted is null or char_length(extracted_text_redacted) <= 8000),
-
-  deleted_at timestamptz,
-  deleted_object_confirmed_at timestamptz
-);
-
 create index evidence_files_deal_idx on public.evidence_files (shop_id, deal_id, uploaded_at desc);
 create index evidence_files_event_idx on public.evidence_files (event_id)
   where event_id is not null;
-create index evidence_files_shop_created_idx on public.evidence_files (shop_id, created_at desc);
+create index evidence_files_shop_uploaded_idx on public.evidence_files (shop_id, uploaded_at desc);
 
 comment on column public.evidence_files.storage_object_key is
   'Private Supabase Storage key. Never a public URL and never written into Walrus Memory.';

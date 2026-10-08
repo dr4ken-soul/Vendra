@@ -92,17 +92,53 @@ as $$
   );
 $$;
 
+-- True when the caller is the registered owner of the shop, according to
+-- shops.owner_user_id rather than to a membership row.
+--
+-- This is deliberately separate from is_shop_owner(), which answers the same
+-- question via a membership. The membership does not exist yet at the moment it
+-- is needed: creating a shop and then claiming the owner membership is the very
+-- first thing a new retailer does, so the membership-based answer is false
+-- precisely when the question is asked.
+--
+-- It must be SECURITY DEFINER. An inline `exists (select 1 from public.shops
+-- ...)` inside a policy does not work, because a subquery inside a Row Level
+-- Security policy is itself filtered by that table's own policies, and
+-- shops_select_member hides every shop the caller has not yet joined. Being
+-- SECURITY DEFINER makes the read use the function owner's privileges, so the
+-- shop is visible to this function even though it is invisible to the caller.
+--
+-- The function grants nothing by itself. It answers one yes/no question, and the
+-- policy combines it with the user and role checks.
+create or replace function public.is_registered_shop_owner(p_shop_id uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select exists (
+    select 1
+    from public.shops s
+    where s.id = p_shop_id
+      and s.owner_user_id = auth.uid()
+      and s.deleted_at is null
+  );
+$$;
+
 revoke all on function public.is_shop_member(uuid) from public;
 revoke all on function public.is_shop_admin(uuid) from public;
 revoke all on function public.has_shop_permission(uuid, public.shop_permission) from public;
 revoke all on function public.has_any_shop_permission(uuid, public.shop_permission[]) from public;
 revoke all on function public.is_shop_owner(uuid) from public;
+revoke all on function public.is_registered_shop_owner(uuid) from public;
 
 grant execute on function public.is_shop_member(uuid) to authenticated;
 grant execute on function public.is_shop_admin(uuid) to authenticated;
 grant execute on function public.has_shop_permission(uuid, public.shop_permission) to authenticated;
 grant execute on function public.has_any_shop_permission(uuid, public.shop_permission[]) to authenticated;
 grant execute on function public.is_shop_owner(uuid) to authenticated;
+grant execute on function public.is_registered_shop_owner(uuid) to authenticated;
 
 -- ---------------------------------------------------------------------------
 -- profiles: a user may read and update only their own row.
@@ -150,6 +186,25 @@ create policy memberships_select_shop on public.shop_memberships
 
 create policy memberships_insert_admin on public.shop_memberships
   for insert with check (public.has_shop_permission(shop_id, 'team.manage'));
+
+-- Bootstrap: a user may create exactly one membership, their own, with role
+-- 'owner', in a shop whose registered owner is them.
+--
+-- memberships_insert_admin alone cannot cover this. It requires 'team.manage',
+-- which the owner does not have before their membership exists, so without this
+-- policy shop creation can never complete: a shop would be created with no
+-- owner and would be unreachable. Policies are permissive and combined with OR,
+-- so inviting anybody else is still governed by memberships_insert_admin and
+-- still requires 'team.manage'.
+--
+-- This cannot be used to reach a shop somebody else owns, because the test is
+-- against shops.owner_user_id rather than anything the client supplies.
+create policy memberships_insert_self_owner on public.shop_memberships
+  for insert with check (
+    user_id = auth.uid()
+    and role = 'owner'
+    and public.is_registered_shop_owner(shop_id)
+  );
 
 create policy memberships_update_admin on public.shop_memberships
   for update using (public.has_shop_permission(shop_id, 'team.manage'))
@@ -235,9 +290,25 @@ create policy assistant_messages_all on public.assistant_messages
   using (public.has_shop_permission(shop_id, 'assistant.ask'))
   with check (public.has_shop_permission(shop_id, 'assistant.ask'));
 
--- Audit rows are read-only for shop admins and are written by the service role.
+-- Audit rows are read-only for shop admins and are never updated or deleted:
+-- only an INSERT policy exists, so the log is append-only for everyone.
 create policy audit_events_select on public.audit_events
   for select using (public.has_shop_permission(shop_id, 'team.manage'));
+
+-- Server-side audit writes go through the acting user's own client wherever the
+-- actor is an ordinary shop member, so this policy has to permit them. It is
+-- deliberately narrow: the writer must already be an active member of the shop
+-- the row names, and may only attribute the row to themselves. It grants no
+-- UPDATE or DELETE, so a member cannot alter or erase the log.
+--
+-- The service role is also permitted, and is used for records where no
+-- interactive membership exists, such as the audit entry for revoking a member
+-- or for provisioning a shop's memory scope.
+create policy audit_events_insert on public.audit_events
+  for insert with check (
+    public.is_shop_member(shop_id)
+    and (actor_user_id is null or actor_user_id = auth.uid())
+  );
 
 -- An owner may request their own export; erasure is owner-only.
 create policy data_requests_select on public.data_requests
