@@ -1,0 +1,86 @@
+# Vendra repository ignores.
+#
+# Secrets are never committed. .env.example IS committed so the project can be
+# set up from a clean clone.
+
+# ---------------------------------------------------------------------------
+# Environment and secrets
+# ---------------------------------------------------------------------------
+.env
+.env.*
+!.env.example
+
+# Any stray key material, regardless of extension.
+*.pem
+*.key
+*service_role*
+*delegate*private*
+
+# ---------------------------------------------------------------------------
+# Dependencies
+# ---------------------------------------------------------------------------
+node_modules/
+.pnp
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
+
+# ---------------------------------------------------------------------------
+# Build output
+# ---------------------------------------------------------------------------
+web/.next/
+web/out/
+web/build/
+web/.vercel/
+dist/
+build/
+
+# ---------------------------------------------------------------------------
+# Test and coverage output
+# ---------------------------------------------------------------------------
+coverage/
+.nyc_output/
+*.tsbuildinfo
+
+# ---------------------------------------------------------------------------
+# Logs and editor noise
+# ---------------------------------------------------------------------------
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+*.log
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+next-env.d.ts
+
+# ---------------------------------------------------------------------------
+# Supabase CLI local state
+# ---------------------------------------------------------------------------
+# supabase/.temp holds the local stack's API keys.
+supabase/.temp/
+.branches/
+supabase/.branches/
+
+# ---------------------------------------------------------------------------
+# Design source assets
+# ---------------------------------------------------------------------------
+# The approved video source and generation stills are retained locally. They
+# are large binaries and the optimised web copy is what ships.
+video/*.mp4
+video/*.mov
+video/*.webm
+
+# ---------------------------------------------------------------------------
+# Evidence and pilot material
+# ---------------------------------------------------------------------------
+# Real retailer evidence and consented screenshots must never enter version
+# control. Public evidence is redacted and placed in docs/ deliberately.
+docs/evidence-local/
+*.heic

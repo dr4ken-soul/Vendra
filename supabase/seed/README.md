@@ -1,0 +1,27 @@
+-- Vendra seed: clearly labelled DEMO FIXTURES. NOT USER EVIDENCE.
+--
+-- These rows exist so that a reviewer can see the shape of a deal timeline
+-- during evaluation. They are synthetic. They are not retailer records, they
+-- are not challenge evidence, and they must never be presented as real usage
+-- or real memory counts.
+--
+-- They are attached to a dedicated demo shop created by `supabase db reset`
+-- only. Real retailer shops are never seeded.
+
+-- The demo shop is owned by a placeholder auth user id. Creating this user
+-- requires the Auth Admin API and is performed by the seed script in
+-- scripts/seed-demo.ts, never by this SQL file.
+--
+-- Structure documented here for reviewers:
+--
+--   shops
+--     └── shop_memberships (owner)
+--           └── suppliers  (3)
+--                 └── deals (3, one per supplier, different lifecycle states)
+--                       ├── deal_lines
+--                       ├── deal_events (quote → agreed → delivery → issue → resolution)
+--                       └── evidence_files (metadata rows only; no objects uploaded)
+--
+-- No walrus_memory_sync rows are seeded. A memory is only ever created by a
+-- retailer-confirmed event flowing through the server write path, so seeding
+-- one would be fabricating the exact evidence the challenge asks us not to fake.

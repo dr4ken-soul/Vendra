@@ -1,0 +1,16 @@
+# Normalise line endings so the repository behaves the same on every platform.
+* text=auto eol=lf
+
+# Binary assets must never be line-ending translated.
+*.mp4 binary
+*.mov binary
+*.webm binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.heic binary
+*.webp binary
+*.pdf binary
+
+# Lockfiles are treated as-is so installs are reproducible.
+package-lock.json -diff linguist-generated=true

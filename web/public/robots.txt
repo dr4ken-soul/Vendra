@@ -1,0 +1,9 @@
+User-agent: *
+# The application is not useful to crawlers and authenticated routes must never
+# be indexed.
+Disallow: /app/
+Disallow: /api/
+Disallow: /onboarding
+Disallow: /sign-in
+Disallow: /auth/
+Allow: /
