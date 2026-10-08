@@ -4,6 +4,7 @@ import { createAdminClient } from '@/lib/supabase/admin';
 import { ApiError, RATE_LIMITS, rateLimit, withErrorHandling } from '@/lib/api';
 import { getUser, listMemberships } from '@/lib/tenancy';
 import { createShopSchema } from '@/lib/validation';
+import { defaultPermissionsForRole } from '@/lib/permissions';
 import { provisionShopMemory } from '@/lib/memory/provisioning';
 import type { Shop } from '@/lib/types';
 
@@ -85,30 +86,45 @@ export const POST = withErrorHandling(async (request: Request) => {
 
   const supabase = await createClient();
 
-  const { data: created, error: insertError } = await supabase
-    .from('shops')
-    .insert({
-      owner_user_id: user.userId,
-      name: input.name,
-      market_area: input.marketArea ?? null,
-      currency_code: input.currencyCode,
-      timezone: input.timezone,
-    })
-    .select('id')
-    .single();
+  /**
+   * The shop id is generated here rather than by Postgres.
+   *
+   * `insert().select()` makes PostgREST request the created row with
+   * `Prefer: return=representation`, which also evaluates the table's UPDATE
+   * policy. The shops UPDATE policy requires the caller to already hold
+   * 'settings.manage' in the shop, which cannot be true for a shop that does not
+   * exist yet, so the insert was rejected with an RLS error naming `shops`
+   * even though both INSERT policies passed.
+   *
+   * Generating the id server-side means the insert needs no returned row, which
+   * keeps the correct, minimal INSERT policy as the only policy that applies.
+   */
+  const shopId = crypto.randomUUID();
 
-  if (insertError || !created) {
-    throw new Error(`Failed to create shop: ${insertError?.message ?? 'unknown error'}`);
+  const { error: insertError } = await supabase.from('shops').insert({
+    id: shopId,
+    owner_user_id: user.userId,
+    name: input.name,
+    market_area: input.marketArea ?? null,
+    currency_code: input.currencyCode,
+    timezone: input.timezone,
+  });
+
+  if (insertError) {
+    throw new Error(`Failed to create shop: ${insertError.message}`);
   }
 
-  const shopId = created.id as string;
-
-  // Owner membership. Permissions come from the database default for the role,
-  // never from a client-supplied array.
+  // Owner membership.
+  //
+  // Permissions are computed on the server from the role and never read from the
+  // request body. They are sent explicitly because the column default is the
+  // STAFF set, which would otherwise leave the shop owner unable to manage the
+  // shop they had just created.
   const { error: membershipError } = await supabase.from('shop_memberships').insert({
     shop_id: shopId,
     user_id: user.userId,
     role: 'owner',
+    permissions: defaultPermissionsForRole('owner'),
   });
 
   if (membershipError) {

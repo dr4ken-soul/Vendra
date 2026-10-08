@@ -6,7 +6,12 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --config vitest.config.ts",
+    "test:unit": "vitest run --config vitest.config.ts tests/unit",
+    "test:isolation": "vitest run --config vitest.config.ts tests/tenant-isolation",
+    "test:e2e": "node scripts/run-e2e.mjs"
   },
   "dependencies": {
     "@ai-sdk/google": "^4.0.90",

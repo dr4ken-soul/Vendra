@@ -144,8 +144,20 @@ export async function answerFromSources(input: {
       prompt: buildUserPrompt(input.question, input.sources),
       // Low temperature: this is a retrieval task, not creative writing.
       temperature: 0.1,
-      maxOutputTokens: 400,
-      abortSignal: AbortSignal.timeout(20_000),
+      /**
+       * Gemini 3.x reasons before answering and those thinking tokens count
+       * against maxOutputTokens. With a small budget the visible answer was
+       * truncated mid-sentence. The budget is raised, and thinking is limited
+       * because the work is constrained extraction over supplied records rather
+       * than open reasoning: a small budget also reduces latency and cost.
+       */
+      maxOutputTokens: 2000,
+      providerOptions: {
+        google: {
+          thinkingConfig: { thinkingBudget: 512 },
+        },
+      },
+      abortSignal: AbortSignal.timeout(45_000),
     });
 
     const text = (result.text ?? '').trim();
@@ -283,8 +295,15 @@ export async function draftFollowUp(input: {
       system: DRAFT_SYSTEM_PROMPT,
       prompt: `SELECTED RECORDS\n${context}\n\nGOAL\n${input.goal}\n\nWrite the message.`,
       temperature: 0.3,
-      maxOutputTokens: 260,
-      abortSignal: AbortSignal.timeout(20_000),
+      // Same reasoning as the answer path: Gemini 3.x thinking tokens share the
+      // output budget, so a larger budget is needed to avoid a truncated draft.
+      maxOutputTokens: 2000,
+      providerOptions: {
+        google: {
+          thinkingConfig: { thinkingBudget: 512 },
+        },
+      },
+      abortSignal: AbortSignal.timeout(45_000),
     });
 
     const text = (result.text ?? '').trim();

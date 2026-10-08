@@ -56,6 +56,10 @@ export function serverSupabaseEnv() {
  * Model provider. Returns null when no key is configured so that the assistant
  * can degrade to timeline browsing with an honest "memory unavailable" state
  * rather than pretending recall succeeded.
+ *
+ * The pinned default is gemini-3.8-flash. Verified live on 8 October 2026:
+ * gemini-2.5-flash and gemini-2.0-flash now return 404 "no longer available"
+ * for new keys, so the previously planned default would have failed at runtime.
  */
 export function modelEnv() {
   const key = process.env.GOOGLE_GENERATIVE_AI_API_KEY;
@@ -63,7 +67,7 @@ export function modelEnv() {
   return {
     apiKey: key,
     // Pinned after verifying the current Gemini model catalogue and pricing.
-    modelId: process.env.GOOGLE_MODEL_ID || 'gemini-2.5-flash',
+    modelId: process.env.GOOGLE_MODEL_ID || 'gemini-3.8-flash',
   };
 }
 

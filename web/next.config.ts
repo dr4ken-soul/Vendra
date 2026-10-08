@@ -16,6 +16,14 @@ const nextConfig: NextConfig = {
   cacheComponents: false,
 
   /**
+   * `next dev` writes an AGENTS.md into the project root and re-creates it on
+   * every run, which would otherwise show up as an untracked change in a
+   * repository that is supposed to stay clean. The advice in it is already
+   * followed (see serverExternalPackages above), so the file is turned off.
+   */
+  agentRules: false,
+
+  /**
    * Server-only dependencies.
    *
    * These must stay outside the bundler so their Node-only crypto and Sui code
