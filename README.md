@@ -42,9 +42,11 @@ production.** What remains is Walrus Memory credentials, and real user evidence.
 | Real user evidence (3 users × 10 memories) | **Not gathered. No users yet.** |
 
 **No claim in this repository is made about usage, memory counts, testimonials
-or challenge completion.** There are no real users yet. The live database
-contains no rows: every test account and record is deleted after each run, and
-`npm run verify:clean` asserts that.
+or challenge completion.** There are no real users yet. The live database holds
+one account, `web3psycho000@gmail.com`, which is the founder's own, created while
+verifying sign-up by hand. It and its single shop are left in place deliberately.
+Every account the automated suites create is deleted after each run, and
+`npm run verify:clean` reports what remains rather than passing silently over it.
 
 ### What the live end-to-end test actually proved
 
@@ -298,6 +300,7 @@ Full reasoning, rejected alternatives and remaining limitations:
 | [`SUBMISSION_PLAN.md`](SUBMISSION_PLAN.md) | Challenge evidence checklist |
 | [`docs/privacy-and-data-flow.md`](docs/privacy-and-data-flow.md) | Data flow as implemented |
 | [`docs/email-delivery.md`](docs/email-delivery.md) | Email sign-up: provider choice, diagnosis, and what it took to be wrong six times |
+| [`docs/deploying.md`](docs/deploying.md) | Vercel Root Directory, stale-deployment check, hostnames |
 | [`docs/walrus-memory-notes.md`](docs/walrus-memory-notes.md) | Custody decision and verification status |
 | [`docs/real-user-test-log.md`](docs/real-user-test-log.md) | Consented pilot evidence (currently empty) |
 
