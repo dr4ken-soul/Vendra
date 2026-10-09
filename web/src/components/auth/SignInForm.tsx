@@ -13,6 +13,7 @@ import {
 } from '@/lib/auth-actions';
 import { Button, Field, TextInput, ErrorMessage, SuccessMessage, InfoMessage } from '@/components/app/ui';
 import { OtpInput, codeDigits } from '@/components/auth/OtpInput';
+import { isEmailShaped } from '@/lib/auth-redirect';
 
 const INITIAL: AuthFormState = { error: null, message: null, stage: 'details' };
 
@@ -125,7 +126,28 @@ export function SignInForm() {
   }, [signInState.stage, verifyState.stage, signUpState.stage, router, returnTo]);
 
   const requestedStage = signUpState.stage === 'code' ? signUpState : signInState.stage === 'code' ? signInState : null;
-  const codeEmail = requestedStage?.email ?? null;
+  const actionCodeEmail = requestedStage?.email ?? null;
+
+  /**
+   * The code step also has to be reachable by URL.
+   *
+   * It used to exist only as server-action state in the tab that happened to run
+   * the sign-up, which meant the email's "enter this code" had nowhere to point.
+   * Open the email on a phone, or refresh, or use a different browser, and the
+   * code box was gone with no way back to it — the retailer had the code and no
+   * field to put it in. The email links here as `/sign-in?email=…&code=1`, so
+   * the fallback is only worth offering if it actually opens.
+   *
+   * A shape check, not a validity check. Nothing is revealed about whether the
+   * address has an account: the page shows a code box either way, and verification
+   * fails generically.
+   */
+  const emailParam = searchParams.get('email');
+  const urlCodeEmail =
+    searchParams.get('code') === '1' && isEmailShaped(emailParam) ? emailParam : null;
+
+  // A fresh action result wins, so a resend for a different address is honoured.
+  const codeEmail = actionCodeEmail ?? urlCodeEmail;
   const onCodeStep = codeEmail !== null && !codeStepDismissed;
 
   const busy = signInPending || signUpPending || verifyPending;
@@ -222,6 +244,9 @@ export function SignInForm() {
                     onClick={() => {
                       setCodeStepDismissed(true);
                       setCode('');
+                      // Drop the query as well, so a refresh does not walk
+                      // straight back into the code step just abandoned.
+                      router.replace(returnTo ? `/sign-in?returnTo=${encodeURIComponent(returnTo)}` : '/sign-in');
                     }}
                     className="font-semibold text-[var(--accent)] underline underline-offset-2 hover:text-[var(--accent-hover)]"
                   >
@@ -264,6 +289,7 @@ export function SignInForm() {
                         type="email"
                         autoComplete="email"
                         required
+                        defaultValue={urlCodeEmail ?? ''}
                         placeholder="you@yourshop.com"
                       />
                     </Field>
@@ -299,6 +325,7 @@ export function SignInForm() {
                         type="email"
                         autoComplete="email"
                         required
+                        defaultValue={urlCodeEmail ?? ''}
                         placeholder="you@yourshop.com"
                       />
                     </Field>

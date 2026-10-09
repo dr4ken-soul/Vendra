@@ -36,6 +36,60 @@ refused to do.
 and a correct code, completing to a session. Acceptance is not delivery. No test
 run proves that, because a test address has no mailbox to receive into.
 
+## Required Supabase settings
+
+Two settings are wrong by default and neither fails loudly. Both must be set.
+
+**Authentication → URL Configuration → Site URL.** This is `http://localhost:3000`
+on a new project, which is what `{{ .SiteURL }}` resolves to in every email
+template. Set it to the production URL.
+
+**Authentication → URL Configuration → Redirect URLs.** Add the production URL.
+`emailRedirectTo` is checked against this allow-list, and a URL that is not on it
+is silently discarded, so the email's link lands on the wrong origin.
+
+`NEXT_PUBLIC_SITE_URL` must match. It is what `siteUrl()` returns, and the
+confirmation route builds its redirects from it. On Vercel it is a project
+environment variable — set it there, not only locally, or the deployed build will
+redirect to `localhost`.
+
+## The confirmation email
+
+Supabase's template supports two ways to confirm, and Vendra uses both.
+
+**The link, primary.** One click, signed in, no typing. This is what Vercel,
+Linear and Notion all lead with.
+
+**The six-digit code, fallback, always visible.** Not hidden behind a "trouble
+signing in?" link. Corporate mail scanners and link prefetchers open every link in
+an incoming message before a person reads it, which consumes a single-use
+confirmation link and produces "token has expired" for a retailer who did nothing
+wrong. Reading six digits consumes nothing.
+
+The link uses `{{ .TokenHash }}` rather than `{{ .ConfirmationURL }}`. This app
+renders on the server with PKCE, so the plain confirmation URL depends on a code
+verifier held by the browser that started sign-up — opening the email on a phone
+would fail. The token hash is self-contained.
+
+An earlier template had this the wrong way round: it led with the code and gave the
+button the text "Open Vendra", pointing at `{{ .SiteURL }}`. That produced an
+email saying "enter this code" whose only link went to the marketing homepage,
+with no code field anywhere in sight.
+
+### The code screen has to be reachable by URL
+
+The code step used to exist only as server-action state inside the tab that ran
+the sign-up. There was no URL for it, so the email's "enter this code" had nowhere
+to point: open the email on another device, refresh, or switch browsers and the
+code box was gone, leaving a retailer holding a code with no field to put it in.
+
+`/sign-in?email=…&code=1` now opens it directly. `safeDestination` and
+`isEmailShaped` live in `src/lib/auth-redirect.ts` and are covered by
+`tests/unit/auth-redirect.test.ts`, which found a real open-redirect hole:
+`/\evil.example` passes a naive `//` check, because it begins with one slash, but
+browsers normalise `\` to `/` and it resolves to a host off-origin. Backslashes are
+now rejected.
+
 ## Why Homeplug does not have this problem
 
 It has custom SMTP configured. That is the explanation, and it is worth stating
