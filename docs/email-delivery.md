@@ -28,24 +28,23 @@ gmail address gets nothing, and the failure looks like one of:
 Vendra reports the real reason rather than saying "try again", because no amount of
 retrying helps. See `describeAuthError` in `web/lib/auth-actions.ts`.
 
-## Why Homeplug appears not to have this problem
+## Why Homeplug does not have this problem
 
-It has exactly the same problem. It just has not been triggered yet.
+It has custom SMTP configured. That is the explanation, and it is worth stating
+plainly because an earlier version of this file did not.
 
-Two things make it look fine:
+An earlier draft claimed Homeplug had the same defect and was "just waiting to be
+triggered". That was an inference drawn from the absence of SMTP settings in its
+environment files. It was wrong, and wrong in a way worth recording: SMTP settings
+live in the Supabase dashboard, not in the repository, so their absence from
+`.env` and `.env.local` is not evidence of anything. Homeplug demonstrably delivers
+to addresses that are not the developer's, which is exactly what a configured SMTP
+provider enables and the built-in sender forbids.
 
-1. **Homeplug uses a different Supabase project** (`csermjndzuexwiikvmie`), with its
-   own team list and its own hourly allowance.
-2. Sign-ups that work are the ones made with **the developer's own email address**,
-   because that address is a member of the Supabase organisation and is therefore
-   on the allow list.
-
-The moment someone signs up with an address that is not a team member of that
-project, it fails the same way Vendra's does. SMTP settings live in the Supabase
-dashboard rather than in the repository, so they cannot be seen from the code, and
-there is no sign of one in the environment files.
-
-This is worth fixing on Homeplug too, or its first real user will hit it.
+What is actually established about Vendra is narrower and still stands: **this
+project** fails with `email_address_invalid` for addresses outside its Supabase
+organisation, verified directly against the running application. Nothing about
+another project follows from that.
 
 ## The fix: connect an email service
 
@@ -63,9 +62,13 @@ You need two things:
 - an **API key** — <https://resend.com/api-keys> → *Create API Key*
 - a **verified sending domain** — <https://resend.com/domains> → *Add Domain*
 
-For a first test you can send from Resend's own onboarding address
-(`onboarding@resend.dev`) and skip the domain. But that only delivers to your own
-inbox, so verify a domain before inviting a real retailer.
+Resend ships a working sending address, `onboarding@resend.dev`, which needs no
+domain setup and **delivers to any recipient**. It is fine for testing and for an
+invite-only pilot. Two things to know about it: the recipient sees
+`onboarding@resend.dev` as the sender, which is not a good look for a product, and
+Resend's free tier still caps you at 100 emails a day and 3,000 a month regardless
+of which address you send from. Verify a domain before inviting anyone you want to
+impress.
 
 The values are fixed:
 
@@ -75,7 +78,7 @@ The values are fixed:
 | Port | `465` for implicit SSL, or `587` for STARTTLS |
 | Username | `resend` |
 | Password | your Resend API key |
-| From address | anything on your verified domain, e.g. `no-reply@yourdomain.com` |
+| From address | `onboarding@resend.dev`, or anything on your verified domain |
 
 ### 2. Enter them in Supabase
 
