@@ -1,9 +1,10 @@
 import React from 'react';
-import { AbsoluteFill, useCurrentFrame, useVideoConfig, interpolate, spring, Easing } from 'remotion';
+import { AbsoluteFill, useCurrentFrame, useVideoConfig, interpolate, spring, Easing, staticFile, Audio } from 'remotion';
 import { loadFont } from '@remotion/google-fonts/Barlow';
 import { loadFont as loadMono } from '@remotion/google-fonts/AzeretMono';
 import { FILM } from './data';
 import { palette, ease, MARGIN, BEATS, FPS } from './theme';
+import { Screen, Plate, ScreenLabel } from './screens';
 
 const { fontFamily: barlow } = loadFont();
 const { fontFamily: azeret } = loadMono();
@@ -275,81 +276,21 @@ const BeatScatter: React.FC = () => {
   );
 };
 
-/** Beat 3 — the record. The product doing the thing, with its own numbers. */
+/**
+ * Beat 3 — the record, as the product actually looks.
+ *
+ * Real capture, not a reconstruction. The claim sits on the capture rather than
+ * beside it, which is the reference's method and is also what lets a judge check
+ * the film against the deployment.
+ */
 const BeatRecord: React.FC = () => {
   const f = useCurrentFrame();
-  const s = FILM.sources.find((x) => x.agreedTotal) ?? FILM.sources[0];
-  const line = FILM.sources[0];
-
-  const rows: Array<[string, string]> = [
-    ['SUPPLIER', FILM.supplier],
-    ['DEAL', String(FILM.dealDate)],
-    ['QUOTED', `6 cartons · 18,000 NGN`],
-    ['AGREED', `6 cartons · ${(s.agreedTotal ?? 17500).toLocaleString('en-GB')} NGN`],
-    ['DELIVERED', '4 cartons'],
-  ];
-
   return (
     <Base>
-      <div style={{ position: 'absolute', left: MARGIN, top: 200, width: 1640 }}>
-        <Eyebrow frame={f} delay={2}>
-          WHAT GETS WRITTEN DOWN
-        </Eyebrow>
-      </div>
-
-      <div
-        style={{
-          position: 'absolute',
-          left: MARGIN,
-          top: 262,
-          width: 1080,
-          background: palette.surface,
-          border: `1px solid ${palette.border}`,
-          borderRadius: 22,
-          padding: '40px 46px',
-          opacity: interpolate(f, [10, 26], [0, 1], { extrapolateRight: 'clamp', easing: EASE }),
-        }}
-      >
-        <div style={{ fontSize: 40, fontWeight: 600, letterSpacing: '-0.03em', color: palette.ink, marginBottom: 26 }}>
-          {FILM.headline}
-        </div>
-        {rows.map(([k, v], i) => {
-          const d = 26 + i * 12;
-          return (
-            <div
-              key={k}
-              style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                padding: '15px 0',
-                borderTop: `1px solid ${palette.borderSubtle}`,
-                opacity: interpolate(f, [d, d + 12], [0, 1], { extrapolateRight: 'clamp', easing: EASE }),
-                transform: `translateX(${interpolate(f, [d, d + 12], [-16, 0], { extrapolateRight: 'clamp', easing: EASE })}px)`,
-              }}
-            >
-              <span style={{ fontFamily: azeret, fontSize: 16, letterSpacing: '0.2em', color: palette.inkMuted }}>{k}</span>
-              <span style={{ fontSize: 30, color: palette.ink, fontWeight: 500 }}>{v}</span>
-            </div>
-          );
-        })}
-      </div>
-
-      <div
-        style={{
-          position: 'absolute',
-          right: MARGIN,
-          top: 300,
-          width: 470,
-          opacity: interpolate(f, [120, 140], [0, 1], { extrapolateRight: 'clamp', easing: EASE }),
-        }}
-      >
-        <div style={{ fontSize: 40, color: palette.ink, lineHeight: 1.24, letterSpacing: '-0.02em' }}>
-          Every one of these becomes a memory.
-        </div>
-        <div style={{ marginTop: 20, fontSize: 22, color: palette.inkMuted, lineHeight: 1.5 }}>
-          Private to this shop. No other shop can read it.
-        </div>
-      </div>
+      <Screen src={staticFile('screens/02-deal-detail.png')} duration={600} />
+      <Plate frame={f} delay={70} width={1080}>
+        Six cartons of tomato paste. Quoted at 18,000 naira, agreed at 17,500.
+      </Plate>
     </Base>
   );
 };
@@ -399,101 +340,34 @@ const BeatGap: React.FC = () => {
   );
 };
 
-/** Beat 5 — the recall. The real answer, revealed in its cited segments. */
+/** Beat 5 — the recall, as the product actually answered it. */
 const BeatRecall: React.FC = () => {
   const f = useCurrentFrame();
-
   return (
     <Base>
-      <div style={{ position: 'absolute', left: MARGIN, top: 150, width: 1700 }}>
-        <Eyebrow frame={f} delay={2}>
-          ASK VENDRA
-        </Eyebrow>
-        <div
-          style={{
-            marginTop: 20,
-            display: 'inline-block',
-            background: palette.surface,
-            border: `1px solid ${palette.border}`,
-            borderRadius: 999,
-            padding: '18px 34px',
-            fontSize: 32,
-            color: palette.ink,
-            opacity: interpolate(f, [8, 24], [0, 1], { extrapolateRight: 'clamp', easing: EASE }),
-          }}
-        >
-          What did we agree with Segun Wholesale, and what went wrong?
-        </div>
-      </div>
-
-      <div
-        style={{
-          position: 'absolute',
-          left: MARGIN,
-          top: 352,
-          width: 1180,
-          background: palette.surface,
-          border: `1px solid ${palette.border}`,
-          borderRadius: 22,
-          padding: '38px 44px',
-        }}
-      >
-        <div
-          style={{
-            fontFamily: azeret,
-            fontSize: 14,
-            letterSpacing: '0.22em',
-            color: palette.inkMuted,
-            marginBottom: 22,
-          }}
-        >
-          GROUNDED ANSWER · {FILM.sources.length} SOURCES
-        </div>
-        {FILM.segments.map((seg, i) => {
-          const d = 30 + i * 26;
-          return (
-            <div
-              key={i}
-              style={{
-                fontSize: 29,
-                lineHeight: 1.44,
-                color: palette.ink,
-                marginBottom: 18,
-                opacity: interpolate(f, [d, d + 16], [0, 1], { extrapolateRight: 'clamp', easing: EASE }),
-                transform: `translateY(${interpolate(f, [d, d + 16], [16, 0], { extrapolateRight: 'clamp', easing: EASE })}px)`,
-              }}
-            >
-              {seg.text}
-            </div>
-          );
-        })}
-      </div>
-
-      <div
-        style={{
-          position: 'absolute',
-          right: MARGIN,
-          top: 400,
-          width: 400,
-          opacity: interpolate(f, [200, 220], [0, 1], { extrapolateRight: 'clamp', easing: EASE }),
-        }}
-      >
-        <div style={{ fontSize: 30, color: palette.ink, lineHeight: 1.3 }}>
-          Every sentence names the record it came from.
-        </div>
-      </div>
+      <Screen src={staticFile('screens/05-ask-answer.png')} duration={720} />
+      <Plate frame={f} delay={54} width={1080}>
+        Answered from deal memory, citing seven source records.
+      </Plate>
     </Base>
   );
 };
 
-/** Beat 6 — the proof. The citations resolve to real events. */
+/**
+ * Beat 6 — the proof.
+ *
+ * The source rows stay because they are the argument: the citations resolve to
+ * named events with ids and dates, which is the difference between an answer and
+ * a guess. They sit beside the capture rather than replacing it, so the viewer
+ * can see both at once.
+ */
 const BeatProof: React.FC = () => {
   const f = useCurrentFrame();
   const shown = FILM.sources.slice(0, 5);
 
   return (
     <Base>
-      <div style={{ position: 'absolute', left: MARGIN, top: 170, width: 1700 }}>
+      <div style={{ position: 'absolute', left: MARGIN, top: 176, width: 1700 }}>
         <Eyebrow frame={f} delay={2}>
           WHERE THE SENTENCE CAME FROM
         </Eyebrow>
@@ -605,6 +479,8 @@ export const VendraFilm: React.FC = () => {
 
   return (
     <AbsoluteFill style={{ background: dark ? palette.dark : palette.ground }}>
+      <Audio src={staticFile('mix.wav')} />
+
       {frame < BEATS.scatter.from && <BeatQuestion />}
       {frame >= BEATS.scatter.from && frame < BEATS.record.from && <BeatScatter />}
       {frame >= BEATS.record.from && frame < BEATS.gap.from && <BeatRecord />}

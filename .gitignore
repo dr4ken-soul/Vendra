@@ -103,3 +103,8 @@ docs/evidence-local/
 # submission rather than in version control.
 demo/out/
 demo/.remotion/
+demo/music/*.wav
+demo/public/mix.wav
+demo/analysis/voiceover/audio/*.pcm
+demo/analysis/voiceover/audio/*.wav
+demo/public/screens/*.png
