@@ -1,32 +1,40 @@
 # Email delivery for sign-up
 
-Sign-up needs to send one verification email per new retailer. On this Supabase
-project that cannot happen today, and the reason is a project setting rather than
-anything in the Vendra code.
+Sign-up sends one verification email per new retailer. **This now works.** Supabase
+is configured to send through Mailjet, which validates a single sender address by
+email rather than requiring a domain, so nothing had to be bought.
 
-## What is happening
+This file spent a long time being wrong about why sign-up failed. The history is
+kept below because it is the reason the current setup is believed.
 
-Supabase's **built-in** email sender, used when no SMTP provider is configured, has
-two restrictions. From the Supabase documentation:
+## Current configuration
 
-> Unless you configure a custom SMTP server for your project, Supabase Auth will
-> refuse to deliver messages to addresses that are not part of the project's team.
-
-> To maintain the health and reputation of the default SMTP sending service, the
-> number of messages your project can send is limited... Currently this value is set
-> to 2 messages per hour.
-
-So it sends **2 emails an hour, project-wide, and only to addresses belonging to
-your Supabase organisation's team members**. A retailer signing up with their own
-gmail address gets nothing, and the failure looks like one of:
-
-| Error code | What it means here |
+| Field | Value |
 |---|---|
-| `email_address_invalid` | The address is not a team member, so the built-in sender will not deliver to it. |
-| `over_email_send_rate_limit` | The project's two emails an hour are used up. |
+| Provider | Mailjet, free plan — 200 emails a day |
+| Host | `in-v3.mailjet.com` |
+| Port | `587` (STARTTLS) |
+| Username | Mailjet API key |
+| Password | Mailjet secret key |
+| Sender email | `vendraagent@gmail.com` |
+| Sender name | `Vendra` |
 
-Vendra reports the real reason rather than saying "try again", because no amount of
-retrying helps. See `describeAuthError` in `web/lib/auth-actions.ts`.
+The sender is a single validated address, not a domain. Mailjet confirmed it
+`Active`, and Supabase Auth then accepted a sign-up for an address belonging to
+nobody in this project:
+
+```
+address  : vendra-retailer-63381@vnd-retailer-probe.com
+signUp ACCEPTED by Supabase Auth.
+```
+
+That is the check that matters. Supabase Auth returns an error when its mailer
+fails, so acceptance means the provider took the message. This is what Resend
+refused to do.
+
+**Still to be verified:** a real sign-up in the browser, with a deliverable address
+and a correct code, completing to a session. Acceptance is not delivery. No test
+run proves that, because a test address has no mailbox to receive into.
 
 ## Why Homeplug does not have this problem
 
@@ -41,31 +49,19 @@ live in the Supabase dashboard, not in the repository, so their absence from
 to addresses that are not the developer's, which is exactly what a configured SMTP
 provider enables and the built-in sender forbids.
 
-What is actually established about Vendra is narrower and still stands: **this
-project** fails with `email_address_invalid` for addresses outside its Supabase
-organisation, verified directly against the running application. Nothing about
-another project follows from that.
+## The provider that was tried first, and why it was abandoned
 
-## The fix: connect an email service
-
-Any SMTP provider works. Resend is the quickest to set up and has a free tier.
+Resend was configured first and does not work here, for one reason: it requires a
+verified domain.
 
 **The key goes in the Supabase dashboard. It is never added to Vendra's code, and
 nothing in `.env.local` changes.** Supabase's Auth server sends the mail itself.
+That is unchanged with Mailjet.
 
-### 1. Get SMTP credentials from Resend
+### The domain requirement, measured rather than assumed
 
-<https://resend.com/signup>
-
-You need two things:
-
-- an **API key** — <https://resend.com/api-keys> → *Create API Key*
-- a **verified sending domain** — <https://resend.com/domains> → *Add Domain*
-
-### The domain is the blocker, and it was measured at DATA, not at RCPT
-
-The cause is confirmed. `scripts/probe-smtp.mjs --port 587 --data` gets a
-complete message as far as the provider, and Resend refuses it:
+`scripts/probe-smtp.mjs --port 587 --data` gets a complete message as far as
+Resend, and Resend refuses it:
 
 ```
 > DATA
@@ -77,8 +73,8 @@ complete message as far as the provider, and Resend refuses it:
 ```
 
 `onboarding@resend.dev` is a test sender. It delivers to the account owner's own
-inbox and nowhere else. **A verified sending domain is required, and it is the
-only thing standing between this project and working sign-up.**
+inbox and nowhere else. **A verified sending domain is required.** For a project
+that cannot buy one, Resend is not usable, and Mailjet replaced it.
 
 That is exactly what an earlier version of this file said, and it was right. The
 version after it said the opposite, on the evidence of a probe that stopped at
@@ -87,11 +83,11 @@ conclusion drawn from it was.** Resend answers `RCPT TO` with `250` and decides
 the recipient question at `DATA`. A probe that never submits a body cannot see the
 restriction no matter how carefully it is written.
 
-So this file has now asserted the correct answer, denied it, and asserted it again.
-The denial was the error, and it came from trusting a partial measurement over a
+So this file asserted the correct answer, denied it, and asserted it again. The
+denial was the error, and it came from trusting a partial measurement over a
 complete one.
 
-## What is established
+## What was established about Resend
 
 | | |
 |---|---|
@@ -106,29 +102,30 @@ email` with no code and no detail, which is why the provider had to be spoken to
 directly. The Resend dashboard shows nothing either, because a message refused at
 `DATA` is never queued and so never appears under Emails.
 
-## The fix, in order
-
-1. **Verify a sending domain** — <https://resend.com/domains> → *Add Domain*. Add
-   the DNS records it asks for. This is the blocker and it cannot be worked around
-   in code.
-2. **Set Supabase's sender** — Authentication → Emails → SMTP Settings → *Sender
-   email* → `no-reply@<your-verified-domain>` → Save.
-3. **Confirm** with `node scripts/check-signup-send.mjs`, which signs up, prints
-   the exact Auth error, and deletes the account it created.
-
-Until step 1 is done, sign-up cannot work for any retailer. That is a real
-blocker, not a configuration detail.
-
 ## How to check it in one command
 
 `web/scripts/check-signup-send.mjs` attempts a real sign-up and prints the exact
-Auth error, then deletes the account it created. Run it after every change to the
+Auth result, then deletes the account it created. Run it after any change to the
 SMTP settings:
 
 ```bash
 cd web
 node scripts/check-signup-send.mjs
+node scripts/check-signup-send.mjs some.retailer@example.com
 ```
+
+Three failures have looked identical from inside the application, and this
+separates them by the code Supabase returns:
+
+| Code | Meaning |
+|---|---|
+| `email_address_invalid` | the built-in sender, team addresses only |
+| `over_email_send_rate_limit` | the project's hourly cap |
+| `Error sending confirmation email` | custom SMTP active, the provider refused |
+
+Acceptance is a real result, because Supabase reports send failures rather than
+swallowing them. Acceptance is not delivery, and a test address with no mailbox
+cannot confirm delivery, because a bounce proves nothing either way.
 
 ## The provider probe
 
@@ -136,8 +133,9 @@ node scripts/check-signup-send.mjs
 read from the environment and never printed.
 
 ```bash
-$env:RESEND_API_KEY = "re_..."
-node scripts/probe-smtp.mjs --port 587 --data
+$env:RESEND_API_KEY = "<the provider's SMTP password>"
+node scripts/probe-smtp.mjs --host in-v3.mailjet.com --user "<api key>" \
+      --port 587 --from vendraagent@gmail.com --to someone@example.com --data
 ```
 
 The variable name is historical. `--host` and `--user` make the probe work against
@@ -251,10 +249,11 @@ Resend requires one, so the constraint was initially read as unavoidable. It is 
 Resend requirement, not an SMTP one. This section records what was actually
 measured about the alternatives.
 
-### Mailjet — no domain required
+### Mailjet — no domain required, and in use
 
-**This is the answer.** Mailjet validates a single sender address by emailing an
-activation link, which needs no DNS at all. From Mailjet's own documentation:
+**This is what is configured and working.** Mailjet validates a single sender
+address by emailing an activation link, which needs no DNS at all. From Mailjet's
+own documentation:
 
 > When you add a specific sender email address, an automatic activation email will
 > be sent to it. To complete the validation, you need to have access to the

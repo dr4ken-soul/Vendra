@@ -1,15 +1,23 @@
 /**
- * Check whether sign-up now gets past Supabase's built-in sender.
+ * Check whether sign-up gets past Supabase's mailer.
  *
- * Before custom SMTP was configured, every sign-up failed with
- * `email_address_invalid`, because the built-in sender only delivers to
- * addresses belonging to the Supabase organisation's team.
+ * Three distinct failures have looked identical from inside the application, and
+ * this separates them by the code Supabase returns:
  *
- * This reports the exact error, if any. It does NOT prove an email arrived: that
- * depends on Resend accepting the send and the recipient's spam filter accepting
- * it, neither of which is observable from here.
+ *   email_address_invalid              the built-in sender, team addresses only
+ *   over_email_send_rate_limit         the project's hourly cap
+ *   Error sending confirmation email   custom SMTP active, provider refused
  *
- *   node scripts/check-signup-send.mjs
+ * Acceptance is a real result: Supabase Auth reports send failures rather than
+ * swallowing them, so no error means the configured provider took the message.
+ *
+ * Acceptance is not delivery. Whether a message lands in an inbox is the
+ * receiving server's judgement and is not observable from here. A test address
+ * with no mailbox cannot confirm it, because a bounce proves nothing either way.
+ *
+ *   node scripts/check-signup-send.mjs [address]
+ *
+ * The address is optional. Any account created is deleted before the script exits.
  */
 import fs from 'node:fs';
 import { createClient } from '@supabase/supabase-js';
@@ -65,9 +73,16 @@ if (error) {
   console.log('signUp ACCEPTED by Supabase Auth.');
   console.log('  session returned:', Boolean(data.session));
   console.log('');
-  console.log('  A verification email was handed to Resend. Whether it arrives is');
-  console.log('  now a question of Resend and the recipient\'s spam filter, not of');
-  console.log('  Supabase. Check the address above for an email from "Vendra".');
+  console.log('  This is the meaningful result. Supabase Auth reports a send failure');
+  console.log('  explicitly, so acceptance means the configured provider took the');
+  console.log('  message rather than refusing it.');
+  console.log('');
+  console.log('  What this does NOT prove: that the message arrived. Deliverability is');
+  console.log('  the receiving inbox\'s judgement, not Supabase\'s. The address above');
+  console.log('  has no mailbox, so a bounce proves nothing either way.');
+  console.log('');
+  console.log('  The real test is a sign-up with a deliverable address and a correct');
+  console.log('  code, which starts a session.');
 }
 
 if (data?.user?.id) {

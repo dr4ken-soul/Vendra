@@ -22,6 +22,7 @@ production.** What remains is Walrus Memory credentials, and real user evidence.
 
 | Area | State |
 |---|---|
+| Email sign-up | **Sending through Mailjet**, free plan, no domain required. Supabase accepts sign-ups for any address. A full sign-up with a correct code completing to a session is **not yet verified.** |
 | Deployment | **Live on Vercel** at `vendra-psycho-projects.vercel.app` |
 | Database schema, migrations, RLS, private storage | **Applied to the live Supabase project** (`tdegxxqxrhbtmqcqfwls`, eu-west-2) |
 | Server API (all routes in `DATA_API_CONTRACTS.md` §5) | Complete, exercised live |
@@ -296,6 +297,7 @@ Full reasoning, rejected alternatives and remaining limitations:
 | [`BUILD_PLAN.md`](BUILD_PLAN.md) | Staged build and validation sequence |
 | [`SUBMISSION_PLAN.md`](SUBMISSION_PLAN.md) | Challenge evidence checklist |
 | [`docs/privacy-and-data-flow.md`](docs/privacy-and-data-flow.md) | Data flow as implemented |
+| [`docs/email-delivery.md`](docs/email-delivery.md) | Email sign-up: provider choice, diagnosis, and what it took to be wrong six times |
 | [`docs/walrus-memory-notes.md`](docs/walrus-memory-notes.md) | Custody decision and verification status |
 | [`docs/real-user-test-log.md`](docs/real-user-test-log.md) | Consented pilot evidence (currently empty) |
 
