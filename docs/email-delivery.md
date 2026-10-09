@@ -247,30 +247,113 @@ retailers will not come close. Paid plans start when you outgrow that.
 
 ## When a domain cannot be bought
 
-The constraint is real and it is not always solvable with money, so this section
-records the ways out that do not involve paying for one.
+Resend requires one, so the constraint was initially read as unavoidable. It is a
+Resend requirement, not an SMTP one. This section records what was actually
+measured about the alternatives.
+
+### Mailjet — no domain required
+
+**This is the answer.** Mailjet validates a single sender address by emailing an
+activation link, which needs no DNS at all. From Mailjet's own documentation:
+
+> When you add a specific sender email address, an automatic activation email will
+> be sent to it. To complete the validation, you need to have access to the
+> respective sender's inbox, as well as your Mailjet account's username and
+> password. Simply click on the activation link within the email.
+
+Validating a whole domain is offered as an *alternative*, by DNS TXT record or by
+hosting a text file. It is not the only route.
+
+Measured against the live server, `scripts/probe-smtp-capabilities.mjs`:
+
+```
+target  in-v3.mailjet.com:587
+< 220 in.mailjet.com ESMTP Mailjet
+< 250-STARTTLS
+< 250-AUTH PLAIN LOGIN DIGEST-MD5 CRAM-MD5
+> STARTTLS
+< 220 2.0.0 Ready to start TLS
+  [TLS established]
+
+    AUTH PLAIN         : yes
+    max message size   : 15,728,640
+```
+
+`AUTH PLAIN` is what Supabase's GoTrue authenticates with, so its presence is what
+matters. Both host and ports come from Mailjet's SMTP documentation: host
+`in-v3.mailjet.com`, port 587 for STARTTLS or 465 for implicit TLS. Credentials are
+at <https://app.mailjet.com/account/relay> — username is the API key, password is
+the secret key.
+
+Free plan: 200 emails a day, 6,000 a month, and the SMTP relay is listed as
+included. That is far beyond a pilot.
+
+**The cost is honest and worth stating:** the sender is a personal address, so
+retailers see `Vendra <your-address@gmail.com>`. `gmail.com`'s SPF does not
+authorise Mailjet, so there is no SPF alignment on the From domain. Mailjet signs
+with its own DKIM, which helps, but delivery is weaker than a real domain and some
+messages may land in spam. For a handful of retailers you already know, that is a
+reasonable trade for not needing a domain. It is not a permanent arrangement.
+
+### Brevo — ruled out
+
+Reachable and technically fine. Measured: `smtp-relay.brevo.com:587` offers
+STARTTLS and `AUTH PLAIN`.
+
+Ruled out on policy, not on capability. Brevo's help centre states that sending
+from a free address will be rejected:
+
+> Sending from a free email address (@gmail, @yahoo, etc.) will cause your emails
+> to be rejected.
+
+and directs users to a professional address on their own domain. So Brevo has the
+same requirement as Resend. Recorded so it is not re-checked.
+
+*Note on sourcing:* the above is Brevo help-centre text retrieved from a search of
+`help.brevo.com`. The article pages themselves returned 404 and could not be opened
+directly, so the wording is quoted from the centre's own search results rather than
+the full article. The claim is strong and consistent across three of their
+articles, but it is not a full-text citation.
+
+### The rest
 
 **Supabase's built-in sender.** Free, and it sends two emails an hour, but only to
 addresses belonging to the Supabase organisation's team. Useless for retailers.
 
-**Providers that will accept a single verified address rather than a domain.**
-This is the option worth checking, because it removes the domain requirement
-entirely. Whether a given provider allows it changes, and it is not something to
-guess at — measure it with `scripts/probe-smtp.mjs --data` before configuring
-Supabase, and read the provider's own sender-verification documentation rather
-than a comparison article.
-
 **A domain that costs nothing.** Free and low-cost registrations exist. Their
 catch is that some registrars require a card for verification even at a zero
-price, so "free" does not always mean "no payment details".
+price, so "free" does not always mean "no payment details". Worth revisiting once
+a real pilot is running.
 
 **Turning email confirmation off.** Supabase can be set to skip confirmation
-entirely. See the section above for the security trade-off. It is the only option
-here that requires nothing from anyone, and it is the weakest.
+entirely. See the section above for the security trade-off. It is the weakest
+option and is no longer needed.
 
 **Send the code some other way.** Only relevant for a pilot small enough that the
-founder can hand it over. It does not scale past a handful of people and should
-not be mistaken for a solution.
+founder can hand it over. It does not scale and should not be mistaken for a
+solution.
+
+### What was verified, and what was not
+
+Verified by measurement:
+
+- Mailjet accepts STARTTLS on 587 and offers `AUTH PLAIN` inside TLS.
+- Brevo accepts STARTTLS on 587 and offers `AUTH PLAIN` inside TLS.
+- Mailjet's documentation describes single-address validation with no DNS step.
+- Brevo's help centre says free addresses are rejected.
+
+**Not verified:** that Mailjet actually accepts a `DATA` submission for this
+account. That needs Mailjet credentials, which this project does not have and must
+not be given to it. It is one command once the account exists:
+
+```bash
+$env:RESEND_API_KEY = "<mailjet secret key>"
+node scripts/probe-smtp.mjs --host in-v3.mailjet.com --user "<mailjet api key>" \
+      --port 587 --from "<your address>" --to "<someone else's address>" --data
+```
+
+If that reports `MESSAGE ACCEPTED`, Supabase is configured and sign-up works for
+everyone.
 
 ### What was verified, and what was not
 
@@ -283,11 +366,8 @@ Measured directly:
 
 Not measured, and therefore not claimed:
 
-- whether Brevo, Mailjet or any other free provider accepts a single verified
-  address instead of a domain. Their pricing pages were read; their sender
-  verification rules were not confirmed, and one Brevo page explicitly
-  contradicted the marketing page on whether a domain is needed. `probe-smtp.mjs`
-  exists so this can be settled by measurement rather than by argument.
+- that Mailjet accepts an actual `DATA` submission for a real account. See above;
+  it needs credentials this project does not hold.
 
 ## What is verified and what is not
 
