@@ -1,29 +1,34 @@
 /**
- * Speak SMTP to Resend exactly the way Supabase does, and report what comes back.
+ * Speak SMTP to Resend the way Supabase does, and report what comes back.
  *
- * This exists because documentation and observation disagreed. Supabase swallows
- * the real SMTP error and returns a generic "Error sending confirmation email", so
- * the cause has to be established by talking to the provider directly.
+ * Supabase swallows the provider's error and returns a generic
+ * "Error sending confirmation email", so the cause has to be established by
+ * talking to the provider directly. This is a diagnostic, not a workaround.
  *
- * It is deliberately a diagnostic, not a workaround. Nothing is changed and no
- * message is delivered. It answers one question: does Resend accept a message from
- * the configured sender to a recipient that is not the account owner's address?
+ * Your API key never has to be shared. It is read from the environment and only
+ * its length is printed.
  *
- * Your API key never has to be shared. This reads it from the environment and
- * prints nothing but its length.
- *
- *   $env:RESEND_API_KEY = "re_..."          # PowerShell
+ *   $env:RESEND_API_KEY = "re_..."                  # PowerShell
  *   node scripts/probe-resend-smtp.mjs
- *   node scripts/probe-resend-smtp.mjs --from no-reply@yourdomain.com
+ *   node scripts/probe-resend-smtp.mjs --port 587
+ *   node scripts/probe-resend-smtp.mjs --data
  *
  * Protocol notes, because getting this wrong produces a misleading answer:
  *
  *   - The server speaks first. Sending anything before the 220 greeting earns a
  *     421 "You talk too soon", which says nothing about the sender.
- *   - Replies are multi-line. The response code is on the final line, which is the
- *     one with a space after the code rather than a hyphen.
+ *   - Replies are multi-line. The response code is on the final line, the one
+ *     with a space after the code rather than a hyphen, which is where the
+ *     EHLO capability list lives.
+ *   - On 587 the connection starts in the clear and is upgraded with STARTTLS.
+ *     After the upgrade the server sends a fresh greeting, so the whole
+ *     greeting/EHLO sequence happens again.
+ *   - Nothing is sent unless --data is passed. Reaching RCPT TO proves the
+ *     envelope is acceptable but says nothing about whether the body is, and
+ *     the body is only answered after the terminating dot.
  */
 
+import net from 'node:net';
 import tls from 'node:tls';
 
 const apiKey = process.env.RESEND_API_KEY;
@@ -32,8 +37,10 @@ const argOf = (flag) => {
   return index === -1 ? undefined : process.argv[index + 1];
 };
 
+const port = Number(argOf('--port') ?? 465);
 const fromAddress = argOf('--from') ?? 'onboarding@resend.dev';
 const toAddress = argOf('--to') ?? 'vendra-probe@example.test';
+const sendData = process.argv.includes('--data');
 
 if (!apiKey) {
   console.error('RESEND_API_KEY is not set. Export it for this shell only:');
@@ -51,24 +58,39 @@ for (const [label, value] of [
   }
 }
 
+if (port !== 465 && port !== 587) {
+  console.error(`--port must be 465 or 587, got ${port}.`);
+  process.exit(1);
+}
+
+const implicitTls = port === 465;
+
 console.log(`key       set (${apiKey.length} chars)`);
 console.log(`from      ${fromAddress}`);
 console.log(`to        ${toAddress}`);
-console.log(`server    smtp.resend.com:465 (implicit TLS)`);
+console.log(`server    smtp.resend.com:${port} (${implicitTls ? 'implicit TLS' : 'STARTTLS'})`);
+console.log(`body      ${sendData ? 'sent - this delivers a real message' : 'not sent'}`);
 console.log('');
 
-const socket = tls.connect({
-  host: 'smtp.resend.com',
-  port: 465,
-  servername: 'smtp.resend.com',
-  rejectUnauthorized: true,
-});
+/** A body shaped like what Supabase actually submits. */
+const message = [
+  'From: Vendra <noreply@resend.dev>',
+  `To: ${toAddress}`,
+  'Subject: Your Vendra sign-up code',
+  'Date: Thu, 09 Oct 2026 12:00:00 +0000',
+  'Message-ID: <probe@resend.dev>',
+  'Content-Type: text/html; charset=UTF-8',
+  '',
+  '<p>Your sign-up code is <strong>123456</strong>.</p>',
+  '',
+].join('\r\n');
 
-/** 0 greeting, 1 ehlo, 2 auth, 3 mail from, 4 rcpt to */
 let stage = 0;
 let buffer = '';
+/** True once STARTTLS has been issued, so the upgrade is never attempted twice. */
+let upgraded = false;
 let code = 0;
-let message = '';
+let message_ = '';
 /**
  * Every line of the current reply, joined.
  *
@@ -79,10 +101,14 @@ let message = '';
  */
 let reply = '';
 
+let socket;
+
 const send = (line) => {
   console.log(`> ${line.replace(/AUTH PLAIN .*/, 'AUTH PLAIN [redacted]')}`);
   socket.write(`${line}\r\n`);
 };
+
+const plain = (line) => socket.write(`${line}\r\n`);
 
 /**
  * Consume complete replies.
@@ -100,24 +126,28 @@ function drain() {
 
     console.log(`< ${line}`);
     code = Number(line.slice(0, 3));
-    message = line.slice(4);
+    message_ = line.slice(4);
 
     // A line ending in `-` continues the reply, so the next line's code is
     // informational rather than the response.
     reply += `${reply ? '\n' : ''}${line}`;
 
-    if (line[3] !== ' ') continue; // continuation line, not the end of the reply
+    if (line[3] !== ' ') continue;
 
-    handle();
+    // Hand the complete reply to handle() before resetting, so that EHLO's
+    // capability list is still available to the stage that needs it.
+    const finished = reply;
+    reply = '';
+    handle(finished);
     return;
   }
 }
 
-function handle() {
+function handle(capabilities = '') {
   switch (stage) {
     case 0:
       if (code !== 220) {
-        console.log(`\nunexpected greeting: ${code} ${message}`);
+        console.log(`\nunexpected greeting: ${code} ${message_}`);
         return finish();
       }
       stage = 1;
@@ -126,32 +156,66 @@ function handle() {
 
     case 1: {
       if (code !== 250) {
-        console.log(`\nEHLO refused: ${code} ${message}`);
+        console.log(`\nEHLO refused: ${code} ${message_}`);
         return finish();
       }
+
+      // On 587 upgrade first, then greet again on the encrypted channel.
+      if (!implicitTls && /STARTTLS/i.test(capabilities) && !upgraded) {
+        upgraded = true;
+        stage = 1.5;
+        send('STARTTLS');
+        return;
+      }
+
+      if (!implicitTls && !upgraded) {
+        console.log('\nthe server does not offer STARTTLS, so 587 cannot be used');
+        return finish();
+      }
+
       stage = 2;
 
       // Search the whole reply, not just its final line. AUTH is a capability and
       // capabilities come back as a multi-line reply.
-      if (/^\s*250[- ]AUTH\s+PLAIN\b/im.test(reply)) {
+      if (/^250[- ]AUTH\s+PLAIN\b/im.test(capabilities)) {
         send(`AUTH PLAIN ${Buffer.from(`\0resend\0${apiKey}`).toString('base64')}`);
-      } else if (/^\s*250[- ]AUTH\s+LOGIN\b/im.test(reply)) {
+      } else if (/^250[- ]AUTH\s+LOGIN\b/im.test(capabilities)) {
         stage = 2.5;
         send('AUTH LOGIN');
       } else {
         console.log('\nthe server advertised no usable AUTH mechanism');
-        console.log(`it offered:\n${reply}`);
+        console.log(`it offered:\n${capabilities}`);
         return finish();
       }
       return;
     }
 
-    case 2.5: {
-      if (code !== 334) {
-        console.log(`\nAUTH LOGIN refused: ${code} ${message}`);
+    case 1.5: {
+      if (code !== 220) {
+        console.log(`\nSTARTTLS refused: ${code} ${message_}`);
         return finish();
       }
-      // 334 VXNlcm5hbWU6 -> username
+      const plainSocket = socket;
+      plainSocket.removeAllListeners();
+      socket = tls.connect(
+        { socket: plainSocket, servername: 'smtp.resend.com', rejectUnauthorized: true },
+        () => {
+          console.log('  [TLS established]');
+        },
+      );
+      attach(socket);
+      // The server greets again on the encrypted channel, so the dialogue
+      // restarts from the top.
+      stage = 0;
+      buffer = '';
+      return;
+    }
+
+    case 2.5: {
+      if (code !== 334) {
+        console.log(`\nAUTH LOGIN refused: ${code} ${message_}`);
+        return finish();
+      }
       send(Buffer.from('resend').toString('base64'));
       stage = 2.6;
       return;
@@ -159,7 +223,7 @@ function handle() {
 
     case 2.6: {
       if (code !== 334) {
-        console.log(`\nAUTH LOGIN refused at the password step: ${code} ${message}`);
+        console.log(`\nAUTH LOGIN refused at the password step: ${code} ${message_}`);
         return finish();
       }
       send(Buffer.from(apiKey).toString('base64'));
@@ -169,10 +233,7 @@ function handle() {
 
     case 2.7:
       if (code !== 235) {
-        console.log(`\nauthentication failed: ${code} ${message}`);
-        console.log('The API key was rejected. Check it exists, is not revoked, and');
-        console.log('belongs to this Resend account.');
-        return finish();
+        return authFailed();
       }
       stage = 3;
       send(`MAIL FROM:<${fromAddress}>`);
@@ -180,10 +241,7 @@ function handle() {
 
     case 2:
       if (code !== 235) {
-        console.log(`\nauthentication failed: ${code} ${message}`);
-        console.log('The API key was rejected. Check it exists, is not revoked, and');
-        console.log('belongs to this Resend account.');
-        return finish();
+        return authFailed();
       }
       stage = 3;
       send(`MAIL FROM:<${fromAddress}>`);
@@ -191,7 +249,7 @@ function handle() {
 
     case 3:
       if (code !== 250) {
-        console.log(`\nMAIL FROM refused: ${code} ${message}`);
+        console.log(`\nMAIL FROM refused: ${code} ${message_}`);
         console.log('The sender address itself was rejected.');
         return finish();
       }
@@ -201,18 +259,49 @@ function handle() {
 
     case 4:
       console.log('');
-      if (code === 250 || code === 251) {
-        console.log('RCPT ACCEPTED.');
-        console.log(`Resend would accept ${fromAddress} -> ${toAddress}.`);
-        console.log('So the sender is not the problem, and the sign-up failure has a');
-        console.log('different cause.');
+      if (code !== 250 && code !== 251) {
+        console.log(`RCPT REJECTED: ${code} ${message_}`);
+        console.log('The sender cannot reach this recipient.');
+        return finish();
+      }
+      console.log('RCPT ACCEPTED.');
+      if (!sendData) {
+        console.log('');
+        console.log('The envelope is accepted but the body was never submitted, so');
+        console.log('nothing here says whether the message itself is acceptable.');
+        console.log('Re-run with --data to submit a body.');
+        console.log('');
+        console.log('No message was sent and nothing was changed.');
+        return finish();
+      }
+      stage = 5;
+      send('DATA');
+      return;
+
+    case 5:
+      if (code !== 354) {
+        console.log(`\nDATA refused: ${code} ${message_}`);
+        console.log('The server will not take a body for this envelope.');
+        return finish();
+      }
+      stage = 6;
+      plain(message.replace(/\./g, '..'));
+      plain('.');
+      return;
+
+    case 6:
+      console.log('');
+      if (code === 250) {
+        console.log(`MESSAGE ACCEPTED: ${code} ${message_}`);
+        console.log('The provider accepted the envelope and the body.');
+        console.log('So a Resend-side content rejection is ruled out.');
       } else {
-        console.log(`RCPT REJECTED: ${code} ${message}`);
-        console.log('The sender cannot reach this recipient, which is what stops');
-        console.log('sign-up working for anyone who is not the account owner.');
+        console.log(`MESSAGE REJECTED: ${code} ${message_}`);
+        console.log('The provider refused the message itself. This is what');
+        console.log('Supabase is hitting, if it is getting this far at all.');
       }
       console.log('');
-      console.log('No message was sent and nothing was changed.');
+      console.log('A message was delivered to the address above and nothing else changed.');
       return finish();
 
     default:
@@ -220,32 +309,55 @@ function handle() {
   }
 }
 
-function finish() {
-  socket.end();
+function authFailed() {
+  console.log(`\nauthentication failed: ${code} ${message_}`);
+  console.log('The API key was rejected. Check it exists, is not revoked, and');
+  console.log('belongs to this Resend account.');
+  finish();
 }
 
-socket.on('data', (chunk) => {
-  buffer += chunk.toString('utf8');
-  drain();
-});
+function finish() {
+  socket.end();
+  setTimeout(() => process.exit(0), 200);
+}
 
-socket.on('error', (error) => {
-  console.log(`connection failed: ${error.message}`);
-  if (/self signed|certificate|unable to verify|wrong version/i.test(error.message)) {
-    console.log('');
-    console.log('A TLS verification failure means this machine is intercepting SMTP or');
-    console.log('its certificate store is incomplete. That would not affect Supabase,');
-    console.log('which runs its own infrastructure, so it would not explain the');
-    console.log('sign-up failure — but it does mean this probe cannot answer the');
-    console.log('question on this machine.');
-  }
-  process.exit(1);
-});
+function attach(sock) {
+  sock.on('data', (chunk) => {
+    buffer += chunk.toString('utf8');
+    drain();
+  });
 
-socket.on('close', () => process.exit(0));
+  sock.on('error', (error) => {
+    console.log(`connection failed: ${error.message}`);
+    if (/self signed|certificate|unable to verify|wrong version/i.test(error.message)) {
+      console.log('');
+      console.log('A TLS verification failure means this machine is intercepting SMTP or');
+      console.log('its certificate store is incomplete. That would not affect Supabase,');
+      console.log('which runs its own infrastructure, so it would not explain the');
+      console.log('sign-up failure — but it does mean this probe cannot answer the');
+      console.log('question on this machine.');
+    }
+    process.exit(1);
+  });
+
+  sock.on('close', () => process.exit(0));
+}
+
+if (implicitTls) {
+  socket = tls.connect({
+    host: 'smtp.resend.com',
+    port: 465,
+    servername: 'smtp.resend.com',
+    rejectUnauthorized: true,
+  });
+  attach(socket);
+} else {
+  socket = net.connect({ host: 'smtp.resend.com', port: 587 });
+  attach(socket);
+}
 
 setTimeout(() => {
   console.log('\ntimed out');
   socket.destroy();
   process.exit(1);
-}, 45_000);
+}, 60_000);
