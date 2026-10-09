@@ -78,20 +78,54 @@ await shot('01-deals');
 /* ---------- the deal and its history ---------- */
 
 /**
- * Real deal links carry a UUID. `/app/deals/new` shares the prefix and was
- * matched first by a plain prefix selector, which navigated to the capture form
- * instead of the deal.
+ * Navigate by id rather than clicking a link.
+ *
+ * Clicking was wrong twice: a plain `a[href^="/app/deals/"]` matches
+ * `/app/deals/new` first, and even excluding that, the deals list did not
+ * reliably yield a deal link — so the capture silently became the **empty
+ * capture form** while the film's caption claimed real figures on it. That is
+ * the worst kind of bug in this project: a frame that looks like evidence and
+ * is not.
+ *
+ * The id is taken from the captured recall response, so the frame and the data
+ * come from the same deal.
  */
-const dealLink = page.locator('a[href^="/app/deals/"]:not([href$="/new"])').first();
-if (await dealLink.count()) {
-  await dealLink.click();
-  await page.waitForURL(/\/app\/deals\/[0-9a-f-]+/, { timeout: 25_000 }).catch(() => {});
-  await page.waitForLoadState('domcontentloaded');
+const DEAL_ID = process.env.DEMO_DEAL_ID ?? readDealId();
+
+function readDealId() {
+  try {
+    const file = join(here, 'recall-response.json');
+    const data = JSON.parse(fs.readFileSync(file, 'utf8'));
+    const id = data?.sources?.[0]?.dealId;
+    if (!id) console.log(`  (${file} has no sources[0].dealId)`);
+    return id ?? null;
+  } catch (err) {
+    // Deliberately not silent. A bare catch here once hid a ReferenceError and
+    // let the run continue with no deal id, which is how an empty capture form
+    // ended up in the film under a caption about real figures.
+    console.log(`  (could not read the deal id: ${err.message})`);
+    return null;
+  }
+}
+
+if (DEAL_ID) {
+  await page.goto(`${BASE}/app/deals/${DEAL_ID}`, { waitUntil: 'domcontentloaded' });
   await waitForText('Tomato paste');
   await page.waitForTimeout(1800);
   await shot('02-deal-detail');
+
+  // Guard the specific failure this whole beat rests on: an empty capture form
+  // is not the deal, and shipping it under a caption about real figures would
+  // be the film lying.
+  const onDeal = page.url().includes(DEAL_ID);
+  const saysRecord = await page.locator('text=Capture a deal').count();
+  if (!onDeal || saysRecord > 0) {
+    console.log('  WARNING: this frame is NOT the saved deal. Do not ship it as one.');
+  } else {
+    console.log('  verified: this is the saved deal, not the capture form');
+  }
 } else {
-  console.log('  (no deal link found)');
+  console.log('  (no deal id; set DEMO_DEAL_ID)');
 }
 
 /* ---------- Ask Vendra, with the real answer ---------- */

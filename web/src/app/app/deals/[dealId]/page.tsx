@@ -1,51 +1,52 @@
 import type { Metadata } from 'next';
-import { requireShop, requireUser, can } from '@/lib/tenancy';
-import { listSuppliers } from '@/lib/data/queries';
-import { DealCaptureWizard } from '@/components/app/DealCaptureWizard';
+import { notFound } from 'next/navigation';
+import { requireShop, requireUser } from '@/lib/tenancy';
+import { getDealDetail } from '@/lib/data/queries';
+import { DealDetailView } from '@/components/app/DealDetailView';
 import { todayInputValue } from '@/lib/format';
 
-export const metadata: Metadata = { title: 'New deal' };
+export const metadata: Metadata = { title: 'Deal' };
 export const dynamic = 'force-dynamic';
 
-export default async function NewDealPage({
+/**
+ * /app/deals/:dealId (FRONTEND_SPEC 4.6)
+ *
+ * This route previously rendered DealCaptureWizard — a verbatim copy of
+ * /app/deals/new — so every deal in the register opened an empty capture form
+ * instead of the deal. Nothing threw and no test failed: the page simply
+ * rendered the wrong component successfully. It was found by capturing a
+ * screenshot of the live site and looking at it.
+ */
+export default async function DealPage({
+  params,
   searchParams,
 }: {
+  params: Promise<{ dealId: string }>;
   searchParams: Promise<{ shop?: string }>;
 }) {
-  const user = await requireUser('/app/deals/new');
-  const params = await searchParams;
-  const { shop, membership } = await requireShop(user.userId, params.shop, '/app/deals/new');
+  const user = await requireUser('/app/deals');
+  const { dealId } = await params;
+  const { shop: shopId, shop, membership } = await requireShop(
+    user.userId,
+    (await searchParams).shop,
+    `/app/deals/${dealId}`,
+  );
 
-  if (!can(membership, 'deal.create')) {
-    return (
-      <div className="rounded-xl border border-[var(--border-default)] bg-[var(--surface-panel)] p-6">
-        <h1 className="font-display text-2xl font-semibold tracking-[-0.03em] text-[var(--text-primary)]">
-          You do not have permission to create deals
-        </h1>
-        <p className="mt-2 font-body text-sm leading-relaxed text-[var(--text-secondary)]">
-          Ask the shop owner or a manager to grant you deal creation access.
-        </p>
-      </div>
-    );
-  }
-
-  const suppliers = await listSuppliers(shop.id);
+  /**
+   * Scoped by shop id in the query itself, so a deal belonging to another shop
+   * is indistinguishable from one that does not exist. Resolving the shop first
+   * and then passing only `shop.id` is what makes that true.
+   */
+  const detail = await getDealDetail(shop.id, dealId);
+  if (!detail) notFound();
 
   return (
-    <DealCaptureWizard
-      suppliers={suppliers.map((s) => ({
-        id: s.id,
-        shop_id: shop.id,
-        display_name: s.displayName,
-        phone: s.phone,
-        notes: s.notes,
-        created_by: '',
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-        archived_at: null,
-      }))}
+    <DealDetailView
+      initialDetail={detail}
       shopId={shop.id}
+      permissions={membership.permissions}
       currencyCode={shop.currency_code}
+      timezone={shop.timezone}
       today={todayInputValue(shop.timezone)}
     />
   );
