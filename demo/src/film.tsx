@@ -26,7 +26,7 @@ const Words: React.FC<{ children: string; frame: number; delay?: number; size: n
   color = palette.ink,
   track = -0.03,
 }) => (
-  <span style={{ display: 'block', fontSize: size, fontWeight: weight, letterSpacing: `${track}em`, lineHeight: 1.02 }}>
+  <span style={{ display: 'block', fontSize: size, fontWeight: weight, letterSpacing: `${track}em`, lineHeight: 1.02, color }}>
     {children.split(' ').map((word, w, all) => (
       <span key={w} style={{ display: 'inline-block', marginRight: w === all.length - 1 ? 0 : '0.26em' }}>
         {word.split('').map((ch, c) => (
