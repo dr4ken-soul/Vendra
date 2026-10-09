@@ -79,25 +79,42 @@ export function modelEnv() {
  *
  * Returns null when no delegate is configured. Callers must treat that as
  * "semantic recall unavailable" and must not claim a memory was stored.
+ *
+ * Exactly two secrets are required, and they are the two `MemWal.create` demands:
+ * the MemWalAccount object id and the Ed25519 delegate key. The relayer
+ * authenticates the delegate key itself, so there is no third credential.
+ *
+ * WALRUS_READER_CREDENTIAL used to be required here and appeared nowhere in the
+ * SDK. It is not part of MemWalConfig, which accepts only key, accountId,
+ * serverUrl and namespace, and the adapter never passed it through. Its sole
+ * effect was to return null forever, so memory could never activate even after
+ * an operator had provisioned a real account and delegate key. The variable is
+ * still read, and still reported, so an operator who set it is not misled into
+ * thinking it did something.
  */
 export function walrusEnv() {
   const accountId = process.env.WALRUS_MEMORY_ACCOUNT_ID;
-  const readerCredential = process.env.WALRUS_READER_CREDENTIAL;
   const delegateKey = process.env.WALRUS_DELEGATE_PRIVATE_KEY;
 
-  if (!accountId || !readerCredential || !delegateKey) {
+  if (!accountId || !delegateKey) {
     return null;
   }
 
   return {
     accountId,
-    apiUrl: process.env.WALRUS_MEMORY_API_URL || undefined,
-    relayerUrl: process.env.WALRUS_RELAYER_URL || undefined,
-    readerCredential,
+    // Prefer WALRUS_MEMORY_API_URL. WALRUS_RELAYER_URL is accepted as a fallback
+    // because that is the name the SDK documentation uses for the same value.
+    apiUrl:
+      process.env.WALRUS_MEMORY_API_URL ||
+      process.env.WALRUS_RELAYER_URL ||
+      undefined,
     delegateKey,
     network: process.env.WALRUS_NETWORK || 'testnet',
     // Owner signing is never performed in a browser request path.
     ownerSigningMode: process.env.WALRUS_OWNER_SIGNING_MODE || 'service_custodian',
+    // Not a credential the SDK accepts. Reported so a stale value is visible
+    // rather than silently ignored.
+    ignoredReaderCredential: Boolean(process.env.WALRUS_READER_CREDENTIAL),
   };
 }
 

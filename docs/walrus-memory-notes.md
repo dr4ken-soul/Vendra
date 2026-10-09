@@ -4,10 +4,9 @@ This file records what was decided about Walrus Memory, what has actually been
 verified, and what remains blocked. It is written to be read by someone deciding
 whether to trust the claims in this repository.
 
-**Short version: no Walrus Memory claim in this repository is verified.** The
-adapter is written against the real SDK's published TypeScript interface, but it
-has never been executed against a live Walrus Memory account, because no such
-account exists yet.
+**Status: provisioned and verified. One account, one namespace per shop, and
+namespace isolation is proved against the live relayer.** The single remaining
+limitation is permanent deletion, which the SDK cannot do.
 
 ---
 
@@ -41,39 +40,86 @@ above, and the trade-off is recorded rather than hidden.
 
 ---
 
-## 2. What the adapter actually calls
+## 2. What is provisioned
 
-The adapter in `web/src/lib/memory/walrus.ts` was written against the installed
-package's own type declarations, not against documentation or memory of the API.
-The interface read from `node_modules/@mysten-incubation/memwal` is:
+Created 9 October 2026 by `web/scripts/provision-walrus.mjs`, which is committed
+and re-runnable on a fresh wallet.
+
+| Item | Value | Where it lives |
+|---|---|---|
+| Network | Sui testnet | `WALRUS_NETWORK` |
+| MemWalAccount object | `0xd8d967af…40195` | `WALRUS_MEMORY_ACCOUNT_ID` |
+| Owner | the Sui wallet that signed `create_account` | on chain |
+| Delegate key | Ed25519, registered on chain via `add_delegate_key` | `WALRUS_DELEGATE_PRIVATE_KEY` |
+| Relayer | `https://relayer-staging.memory.walrus.xyz` | `WALRUS_MEMORY_API_URL` |
+
+The network package and registry ids are **published deployment parameters**, not
+secrets, and they live in the provisioning script rather than the environment:
 
 ```
-MemWal.create(...)
-memwal.remember(...)
-memwal.getRememberStatus(...)
-memwal.recall(...)
-memwal.listNamespaces()
+testnet   package 0x0a625e2db2af6f591a4c80a3d8551ddf11656089cc3a20c5e9e7f8fb75b9265c
+          registry 0x736aef9906798fca4460490ccdf8e8502ef170122dc26ecae32111b78c6b42dd
+mainnet   package 0xe7c16fbea0560e7057e2bf7422feaa4fb313749fc69c9e9092fac7a33b81d7f5
+          registry 0x8bf82c9e09e36b8d1c38298f68b7cb68e7b8762887e7592add9986d5e9cf199f
 ```
 
-Those five methods are what the adapter uses, and nothing else. If the real SDK
-differs at runtime, the adapter fails loudly; it does not fall back to writing
-somewhere else and report success.
+Source: <https://docs.wal.app/walrus-memory/contract/overview#network-ids>
+
+The runtime `MemWal` path does **not** need the package or registry id. Only
+`MemWalManual`, which signs Seal operations locally, does. Provisioning needs
+both, because `create_account` is a Move call.
+
+**Verify the account yourself:** <https://suiscan.xyz/testnet/object/0xd8d967af046ea944853870016313547ff3d45eebfbfb9bcfc8c67a7b4ef40195>
+
+### Why the account id and delegate key are not in this repository
+
+They are credentials. `WALRUS_DELEGATE_PRIVATE_KEY` signs every memory write. It
+lives in `web/.env.local`, which is gitignored, and in a secrets manager in any
+real deployment.
+
+Rotation does not require moving ownership: register a new delegate key, redeploy,
+then remove the old one on chain. Removed keys cannot read anything written after
+removal, though memories written while the key was valid stay readable to it
+until re-encrypted.
 
 ---
 
-## 3. Verification matrix
+## 3. What is verified, and how
 
-| Claim | Status | How it would be verified | Currently |
-|---|---|---|---|
-| A memory write reaches Walrus | **UNVERIFIED** | Provision a live account, write one memory, confirm `getRememberStatus` reports it | No account |
-| A memory can be recalled | **UNVERIFIED** | `recall()` with a query whose answer is known | No account |
-| One namespace cannot return another shop's memories | **UNVERIFIED** | `tests/walrus-memory/isolation.test.ts` | **Skipped** |
-| Deleting a shop removes its memories | **BLOCKED — impossible** | — | See below |
-| The memory count shown to the retailer is real | **UNVERIFIED** | Compare `listNamespaces().memory_count` to a manual count | No account |
+`tests/walrus-memory/isolation.test.ts` runs against the live relayer. **All six
+assertions pass.**
 
-The isolation test suite **skips loudly and prints why** when credentials are
-absent. It does not pass vacuously. A green test run with no credentials does
-**not** mean isolation is verified, and the README says so explicitly.
+| Assertion | Result |
+|---|---|
+| The configured relayer is reachable | passes |
+| A memory can be written into Shop A's namespace | passes |
+| A different memory can be written into Shop B's namespace | passes |
+| Recalling Shop A never returns Shop B's memory | passes |
+| Recalling Shop B never returns Shop A's memory | passes |
+| An empty namespace reports empty, not another shop's memories | passes |
+
+This is the check `WALRUS_ACCOUNT_CUSTODY.md` required **before real retailer data
+is accepted**, and it is now satisfied. It is the second isolation boundary
+alongside Supabase RLS.
+
+Two shop memories are written and recalled during the suite and remain on the
+testnet relayer. That is test data in a namespace named `vendra-test-*`, not
+retailer data.
+
+### A bug that made this untestable
+
+`walrusEnv()` required `WALRUS_READER_CREDENTIAL`. **No such credential exists.**
+`MemWalConfig` accepts exactly four fields — `key`, `accountId`, `serverUrl`,
+`namespace` — and the adapter never passed a reader credential to the SDK either.
+Its only effect was to return `null` forever, so memory could never activate even
+after an operator had provisioned a real account. The field is now ignored, and
+`walrusEnv()` reports if a stale value is set rather than pretending it mattered.
+
+A second bug hid the first: vitest never loaded `.env.local`, so every suite saw
+an empty environment. The tenant-isolation suite had worked around this by parsing
+the file itself, through a path built with `new URL(...).pathname`, which
+percent-encodes spaces. On a path containing "Coding Area" it silently found
+nothing. Both are fixed; tests now load the same environment the app does.
 
 ---
 
@@ -88,45 +134,10 @@ This has a direct consequence that the application does not soften:
   Postgres rows, the private Storage objects, and the auth account.
 - It reports the Walrus Memory layer as **`blocked`**, never as `complete`.
 
-A retailer who erases their data is therefore told, in the response and in the
-UI, that one layer could not be deleted and why. Silently reporting success here
-would be the single most dishonest thing this application could do, because the
-retailer's belief that their data is gone would be false.
+A retailer who erases their data is told, in the response and in the UI, that one
+layer could not be deleted and why. Silently reporting success here would be the
+single most dishonest thing this application could do, because the retailer's
+belief that their data is gone would be false.
 
-This is recorded in `docs/privacy-and-data-flow.md` and in the `/privacy` page.
-
----
-
-## 5. What is needed to close this out
-
-1. **The Walrus Memory package id** for the target Sui network.
-2. **The AccountRegistry shared object id** for that network.
-3. A funded Sui testnet wallet to pay for the account-creation transaction.
-
-With those, provisioning uses the SDK's own account entry point:
-
-```ts
-import { createAccount, addDelegateKey } from '@mysten-incubation/memwal/account';
-```
-
-Those two ids are not published on a credentials page the way a database key is.
-They are deployment parameters of the Walrus Memory contracts on a specific
-network, and they have deliberately **not been guessed**. A wrong id produces a
-transaction that either fails or, worse, succeeds against the wrong contract.
-
----
-
-## 6. Why the application still works without any of this
-
-Walrus Memory is the cross-session recall layer. It is not the system of record.
-
-- Confirmed deal events save to Postgres first. That write is authoritative.
-- A `walrus_memory_sync` row is inserted **before** the network call, so a crash
-  between the two cannot lose the fact that a memory was owed.
-- If the write fails, the row records the failure and the shop's memory status
-  shows as unavailable.
-- Ask Vendra then falls back to searching the retailer's real Postgres records and
-  says plainly that deal memory is unavailable.
-
-So the product is usable and honest today. What it cannot yet do is recall across
-sessions from the memory layer specifically. That capability is claimed nowhere.
+Two tests in the Walrus suite skip for exactly this reason, and the suite says so
+rather than passing vacuously.

@@ -15,6 +15,10 @@ export default defineConfig({
   test: {
     environment: 'node',
     include: ['../tests/**/*.test.ts'],
+    // Load .env.local so a test calling the application's own config helpers sees
+    // the same environment the running app does. Without it, a suite can report
+    // a live feature as unconfigured when it is configured and working.
+    setupFiles: ['./vitest.setup.ts'],
     // The tenant-isolation suite exercises the real Supabase REST API and needs
     // more than the default allowance.
     testTimeout: 60_000,
