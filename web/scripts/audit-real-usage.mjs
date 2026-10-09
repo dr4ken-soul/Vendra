@@ -80,7 +80,9 @@ for (const u of users.users) {
     shops: shopsForUser.length,
     deals: dealsForUser.length,
     events: eventsForUser.length,
-    memories: memoryForUser.length,
+    // Only `ready` is recalled from, so only `ready` counts as usable memory.
+    memories: memoryForUser.filter((m) => m.status === 'ready').length,
+    memoriesWritten: memoryForUser.length,
     joined: u.created_at?.slice(0, 10) ?? '?',
   });
 }
@@ -88,7 +90,7 @@ for (const u of users.users) {
 rows.sort((a, b) => b.memories - a.memories || b.deals - a.deals);
 
 console.log(
-  ['email', 'shops', 'deals', 'events', 'memories', 'joined'].join('\t'),
+  ['email', 'shops', 'deals', 'events', 'ready', 'written', 'joined'].join('\t'),
 );
 for (const r of rows) {
   console.log(
@@ -98,6 +100,7 @@ for (const r of rows) {
       r.deals,
       r.events,
       r.memories,
+      r.memoriesWritten,
       r.joined,
     ].join('\t'),
   );
@@ -125,5 +128,29 @@ if (ready.length < 3) {
   console.log('It needs more people recording real deals on their own accounts.');
 }
 
-const pending = (memory ?? []).filter((m) => m.status !== 'active').length;
-console.log(`\nmemory rows not active: ${pending}`);
+/**
+ * Memory row status.
+ *
+ * walrus_memory_sync.status uses queued | processing | ready | failed |
+ * superseded. Only `ready` is recalled from. `processing` means the write was
+ * accepted by the relayer and is waiting to be promoted, which happens when the
+ * Ask or Settings screen loads — see scripts/probe-stuck-memory.mjs.
+ *
+ * This script previously tested for 'active', which is the *shop-level* memory
+ * status from provisioning.ts, a different vocabulary entirely. That made every
+ * account read as zero memories, including accounts the UI showed as ready.
+ */
+const byStatus = new Map();
+for (const m of memory ?? []) byStatus.set(m.status, (byStatus.get(m.status) ?? 0) + 1);
+
+console.log('\nmemory rows by status:');
+for (const [status, n] of [...byStatus].sort((a, b) => b[1] - a[1])) {
+  console.log(`  ${String(status).padEnd(12)} ${n}`);
+}
+
+const stuck = (memory ?? []).filter((m) => m.status === 'processing' || m.status === 'queued').length;
+if (stuck) {
+  console.log(`\n${stuck} rows written but not yet promoted to ready.`);
+  console.log('The data is on Walrus; the row is waiting for a page load to reconcile.');
+  console.log('Run: node scripts/probe-stuck-memory.mjs --reconcile');
+}
