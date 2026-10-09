@@ -307,9 +307,16 @@ function handle(capabilities = '') {
       console.log('RCPT ACCEPTED.');
       if (!sendData) {
         console.log('');
-        console.log('The envelope is accepted but the body was never submitted, so');
-        console.log('nothing here says whether the message itself is acceptable.');
-        console.log('Re-run with --data to submit a body.');
+        console.log('What this establishes: the credentials work, and the provider');
+        console.log('accepted this envelope.');
+        console.log('');
+        console.log('What it does NOT establish: that the message can be sent.');
+        console.log('Resend answers RCPT TO with 250 and defers the real recipient');
+        console.log('check to DATA. A test sender passes this stage and is still');
+        console.log('refused at the next one.');
+        console.log('');
+        console.log('Re-run with --data to submit a body. Until then this run cannot');
+        console.log('support any conclusion about who the sender may reach.');
         console.log('');
         console.log('No message was sent and nothing was changed.');
         return finish();
@@ -337,8 +344,9 @@ function handle(capabilities = '') {
         console.log('So a Resend-side content rejection is ruled out.');
       } else {
         console.log(`MESSAGE REJECTED: ${code} ${message_}`);
-        console.log('The provider refused the message itself. This is what');
-        console.log('Supabase is hitting, if it is getting this far at all.');
+        console.log('The provider refused the message itself. This is the stage');
+        console.log('that decides whether the sender may reach this recipient,');
+        console.log('so this is the answer that matters.');
       }
       console.log('');
       console.log('A message was delivered to the address above and nothing else changed.');

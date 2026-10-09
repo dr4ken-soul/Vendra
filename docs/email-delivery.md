@@ -62,44 +62,62 @@ You need two things:
 - an **API key** — <https://resend.com/api-keys> → *Create API Key*
 - a **verified sending domain** — <https://resend.com/domains> → *Add Domain*
 
-### The domain is not optional for production, but it is not the current blocker
+### The domain is the blocker, and it was measured at DATA, not at RCPT
 
-An earlier version of this file said the `resend.dev` domain was the reason
-sign-up fails, on the strength of a Resend documentation page. **That was wrong,
-and it was measured wrong.** `scripts/probe-resend-smtp.mjs` speaks SMTP to Resend
-with the same credentials and the same addresses, and Resend answers:
+The cause is confirmed. `scripts/probe-resend-smtp.mjs --port 587 --data` gets a
+complete message as far as the provider, and Resend refuses it:
 
 ```
-< 235 Authentication successful
-> MAIL FROM:<onboarding@resend.dev>
-< 250 Accepted
-> RCPT TO:<vendra-probe@example.test>
-< 250 Accepted
+> DATA
+< 354 End data with <CR><LF>.<CR><LF>
+< 550 You can only send testing emails to your own email address
+  (psychoancestor092@gmail.com). To send emails to other recipients, please
+  verify a domain at resend.com/domains, and change the 'from' address to an
+  email using this domain.
 ```
 
-The sender and the recipient are both accepted. The documented `resend.dev`
-restriction did not occur.
+`onboarding@resend.dev` is a test sender. It delivers to the account owner's own
+inbox and nowhere else. **A verified sending domain is required, and it is the
+only thing standing between this project and working sign-up.**
 
-Two things follow. First, no domain is needed to get sign-up working. Second,
-the failure is somewhere Supabase is not disclosing, because Supabase returns a
-generic `Error sending confirmation email` with no code and no detail.
+That is exactly what an earlier version of this file said, and it was right. The
+version after it said the opposite, on the evidence of a probe that stopped at
+`RCPT TO` and read `250` as permission to send. **The probe was not wrong; the
+conclusion drawn from it was.** Resend answers `RCPT TO` with `250` and decides
+the recipient question at `DATA`. A probe that never submits a body cannot see the
+restriction no matter how carefully it is written.
 
-A verified domain is still worth having before inviting anyone outside the team:
-it is the only way the recipient sees a real sender address, and it is what SPF,
-DKIM and DMARC authenticate against. But it is a polish item, not the blocker.
+So this file has now asserted the correct answer, denied it, and asserted it again.
+The denial was the error, and it came from trusting a partial measurement over a
+complete one.
 
-## What is actually known about the failure
+## What is established
 
 | | |
 |---|---|
 | SMTP is active | Supabase no longer returns `email_address_invalid` |
-| The send is rejected | `Error sending confirmation email`, no code |
-| Resend accepts these credentials | probe: `235 Authentication successful` |
-| Resend accepts this sender to a foreign recipient | probe: `250` on both `MAIL FROM` and `RCPT TO` |
+| Credentials work | probe: `235 Authentication successful` |
+| Port is not the cause | the full dialogue completes on both 465 and 587 |
+| The domain is not the cause | three different recipient domains give the identical error |
+| **Sender is the cause** | **probe: `550` at `DATA`, "only send testing emails to your own email address"** |
 
-What has **not** been established is why. The gap is that Supabase does not
-surface the provider's error. The authoritative source is **Authentication → Logs**
-in the Supabase dashboard, which records the SMTP exchange.
+Supabase surfaces none of this. It returns a generic `Error sending confirmation
+email` with no code and no detail, which is why the provider had to be spoken to
+directly. The Resend dashboard shows nothing either, because a message refused at
+`DATA` is never queued and so never appears under Emails.
+
+## The fix, in order
+
+1. **Verify a sending domain** — <https://resend.com/domains> → *Add Domain*. Add
+   the DNS records it asks for. This is the blocker and it cannot be worked around
+   in code.
+2. **Set Supabase's sender** — Authentication → Emails → SMTP Settings → *Sender
+   email* → `no-reply@<your-verified-domain>` → Save.
+3. **Confirm** with `node scripts/check-signup-send.mjs`, which signs up, prints
+   the exact Auth error, and deletes the account it created.
+
+Until step 1 is done, sign-up cannot work for any retailer. That is a real
+blocker, not a configuration detail.
 
 ## How to check it in one command
 
@@ -112,21 +130,41 @@ cd web
 node scripts/check-signup-send.mjs
 ```
 
-It separates the cases that look identical from inside the application: the
-built-in sender refusing an address, and SMTP being active with the send failing.
-
 ## The provider probe
 
-`web/scripts/probe-resend-smtp.mjs` reports what Resend actually says, without
-sending anything. The key is read from the environment and never printed.
+`web/scripts/probe-resend-smtp.mjs` reports what Resend actually says. The key is
+read from the environment and never printed.
 
 ```bash
 $env:RESEND_API_KEY = "re_..."
-node scripts/probe-resend-smtp.mjs
+node scripts/probe-resend-smtp.mjs --port 587 --data
 ```
 
-Three bugs in that script are worth recording, because each produced a confident
-wrong answer. It sent `EHLO` before reading the greeting and was told `421 You
+`--data` is not optional in practice. Without it the probe stops at `RCPT TO`,
+and `RCPT TO` is exactly the stage where the `resend.dev` restriction is still
+invisible. That is the mistake this file made twice.
+
+Six bugs in that script produced six confident wrong answers, and they are worth
+recording together because the pattern is more useful than any one of them:
+
+| # | What it did | What the server said |
+|---|---|---|
+| 1 | sent `EHLO` before the greeting | `421 You talk too soon` |
+| 2 | read only the last line of `EHLO` for `AUTH` | had advertised `AUTH PLAIN LOGIN` |
+| 3 | `From` header did not match the envelope sender | `550 Invalid 'from' field` |
+| 4 | waited for a re-greeting after `STARTTLS` | sent none; RFC 3207 allows either |
+| 5 | doubled every period, not leading ones | `550 Invalid 'from' field` again |
+| 6 | — | — |
+
+Bugs 3 and 5 both produced a `550` naming the From field, and neither was about
+the From field. Both were mine, and both would have been read as facts about the
+account if taken at face value.
+
+Every one of them came from encoding a protocol rule from memory instead of
+reading the transcript that was showing it break. The standing rule for this
+file: **a partial measurement is not a weaker finding, it is a different
+measurement.** Stopping at `RCPT TO` did not weaken the domain conclusion, it
+replaced it.
 talk too soon`; then it searched only the final line of the multi-line `EHLO`
 reply for `AUTH` and reported that Resend offered no mechanism, when it had
 advertised `AUTH PLAIN LOGIN` three lines earlier. Both were checked against the
@@ -223,23 +261,28 @@ from inside the app.
 
 ## A correction worth recording
 
-This file went back and forth on the `resend.dev` restriction before landing in the
-wrong place twice. It claimed the address delivered only to the account owner,
-then claimed it delivered to anyone, then claimed the restriction was blocking
-sign-up. Only the first was supported, and it is not supported either: measured
-directly, Resend accepts the address for any recipient.
+This file asserted the `resend.dev` restriction, then denied it, then re-asserted
+it. The final position is the original one, and the denial was the mistake.
 
-What actually happened each time was matching a symptom to a documentation page
-without checking whether the page described the observed behaviour. Twice the
-apparent contradiction between the page and the symptom was resolved by
-re-reading the page rather than by testing.
+The denial rested on a probe that had reached `RCPT TO` and received `250`. That
+`250` is real and it is not in dispute. What it means is narrower than what was
+claimed from it: it says the envelope was accepted, not that the message will be
+sent. Resend defers the recipient check to `DATA`, so the probe was stopped one
+stage short of the only stage that answers the question. A correct measurement was
+turned into a wrong conclusion by reading past what it covered.
 
-The measurements themselves were also untrustworthy for three runs, for reasons
-that had nothing to do with Resend: the probe spoke before the server greeted it,
-then lost the capabilities because it read only the last line of a multi-line
-reply. A wrong answer from a tool I wrote is not evidence, however confident its
-output format.
+The cost of that was concrete. While this file said no domain was needed, the
+project sat with SMTP configured to a test sender that cannot reach any retailer.
+The diagnosis had been available from the first run; it was withheld because a
+partial result was preferred to the inconvenient one.
 
-The standing rule for this file: **a plausible match is not a finding.** Say what
-was measured, say what was assumed, and do not let the second become the first.
+Two rules follow, and they are narrower than the general advice they replace:
+
+**A partial measurement is not a weaker finding, it is a different measurement.**
+Know which stage a probe stopped at before quoting what it proves.
+
+**Do not override an inconvenient measurement with a convenient one.** The
+original claim was correct and was reversed without new evidence against it — only
+with evidence that had not yet been gathered. That asymmetry, not the probe bug,
+is what cost the most.
 
