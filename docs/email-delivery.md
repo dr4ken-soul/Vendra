@@ -6,79 +6,138 @@ anything in the Vendra code.
 
 ## What is happening
 
-Supabase's **built-in** email sender, used when no SMTP provider is configured:
+Supabase's **built-in** email sender, used when no SMTP provider is configured, has
+two restrictions. From the Supabase documentation:
 
-- allows **2 messages per hour for the whole project**, and
-- since September 2024 delivers **only to members of the Supabase organisation**.
+> Unless you configure a custom SMTP server for your project, Supabase Auth will
+> refuse to deliver messages to addresses that are not part of the project's team.
 
-So a sign-up from a real retailer fails with one of:
+> To maintain the health and reputation of the default SMTP sending service, the
+> number of messages your project can send is limited... Currently this value is set
+> to 2 messages per hour.
+
+So it sends **2 emails an hour, project-wide, and only to addresses belonging to
+your Supabase organisation's team members**. A retailer signing up with their own
+gmail address gets nothing, and the failure looks like one of:
 
 | Error code | What it means here |
 |---|---|
+| `email_address_invalid` | The address is not a team member, so the built-in sender will not deliver to it. |
 | `over_email_send_rate_limit` | The project's two emails an hour are used up. |
-| `email_address_invalid` | The address is not a Supabase team member, so the built-in sender will not deliver to it. |
 
-Vendra reports the real reason rather than saying "try again", because no amount
-of retrying helps. See `describeAuthError` in `web/src/lib/auth-actions.ts`.
+Vendra reports the real reason rather than saying "try again", because no amount of
+retrying helps. See `describeAuthError` in `web/lib/auth-actions.ts`.
 
-## How to fix it
+## Why Homeplug appears not to have this problem
 
-Pick one. Both are project settings, not code.
+It has exactly the same problem. It just has not been triggered yet.
 
-### Option A — connect an email service (the right fix)
+Two things make it look fine:
 
-Keeps the six-digit code meaningful, because the code proves the retailer can read
-mail at that address.
+1. **Homeplug uses a different Supabase project** (`csermjndzuexwiikvmie`), with its
+   own team list and its own hourly allowance.
+2. Sign-ups that work are the ones made with **the developer's own email address**,
+   because that address is a member of the Supabase organisation and is therefore
+   on the allow list.
 
-1. Create an account with an email provider. Resend, Postmark, Brevo, Amazon SES
-   and SendGrid all work. A free tier is enough for a pilot of a few dozen
-   retailers.
-2. Verify the sending domain with SPF, DKIM and DMARC.
-3. In Supabase, open **Authentication → Emails → SMTP Settings**, turn on
-   **Enable custom SMTP**, and enter the host, port, username, password and
-   sender address.
+The moment someone signs up with an address that is not a team member of that
+project, it fails the same way Vendra's does. SMTP settings live in the Supabase
+dashboard rather than in the repository, so they cannot be seen from the code, and
+there is no sign of one in the environment files.
 
-   Direct link for this project:
-   <https://supabase.com/dashboard/project/tdegxxqxrhbtmqcqfwls/auth/templates>
+This is worth fixing on Homeplug too, or its first real user will hit it.
 
-4. Set the email template so it shows `{{ .Token }}`, which is the six-digit code.
-   A ready-made version is at `web/supabase/email-template.html` in this repo,
-   adapted from the layout Homeplug uses.
+## The fix: connect an email service
 
-5. Once SMTP is on, raise the limit under **Authentication → Rate Limits** →
-   *Rate limit for sending emails*. Custom SMTP starts at 30 an hour, which is
-   plenty for a pilot.
+Any SMTP provider works. Resend is the quickest to set up and has a free tier.
 
-### Option B — turn off email confirmation (works today, weaker)
+**The key goes in the Supabase dashboard. It is never added to Vendra's code, and
+nothing in `.env.local` changes.** Supabase's Auth server sends the mail itself.
 
-In **Authentication → Sign In / Providers → Email**, turn off **Confirm email**.
+### 1. Get SMTP credentials from Resend
 
-Vendra already handles this: `signUp` then returns a usable session, no code is
-ever sent, and the sign-up form skips the code step and goes straight to
-onboarding. Sign-up works immediately, with no email service at all.
+<https://resend.com/signup>
 
-**What is given up.** Anyone can claim any address. Nobody proves they can read
-mail there. For an invite-only pilot with retailers you have spoken to, that is
-often acceptable. For open public sign-up it is not: someone could register as
-another shop, and password reset becomes unusable.
+You need two things:
 
-If you choose this, say so in the privacy notice rather than leaving it implied.
-It changes what "your login and a display name" means in the data list.
+- an **API key** — <https://resend.com/api-keys> → *Create API Key*
+- a **verified sending domain** — <https://resend.com/domains> → *Add Domain*
 
-### Option C — keep SMTP but raise only the rate limit
+For a first test you can send from Resend's own onboarding address
+(`onboarding@resend.dev`) and skip the domain. But that only delivers to your own
+inbox, so verify a domain before inviting a real retailer.
 
-Not possible on the built-in sender. The two-per-hour figure is fixed, and the
-`rate_limit_email_sent` setting only takes effect once custom SMTP or the Send
-Email hook is enabled.
+The values are fixed:
 
-## Which is right for the pilot
+| Field | Value |
+|---|---|
+| Host | `smtp.resend.com` |
+| Port | `465` for implicit SSL, or `587` for STARTTLS |
+| Username | `resend` |
+| Password | your Resend API key |
+| From address | anything on your verified domain, e.g. `no-reply@yourdomain.com` |
 
-Option A, if you can get a free SMTP account. It costs nothing at this scale and
-it keeps the verification step meaningful, which is the whole reason the code
-exists.
+### 2. Enter them in Supabase
 
-Option B, if you need sign-up working today and are recruiting retailers you have
-already spoken to. It is honest as long as it is disclosed.
+<https://supabase.com/dashboard/project/tdegxxqxrhbtmqcqfwls/auth/smtp>
+
+This is the **SMTP Settings** tab next to **Templates** on the page in the
+screenshot. Turn on *Enable custom SMTP* and fill in the five fields above.
+
+This is the step the screenshot is blocked on. The banner says *"Set up custom SMTP
+to edit templates"*, which is literal: the template fields stay read-only until SMTP
+is configured. That is why this cannot be skipped or reordered.
+
+### 3. Now the template becomes editable
+
+Once SMTP saves, the **Templates** tab unlocks. Open **Confirm sign up** and paste
+the body from `web/supabase/email-template.html`. It shows `{{ .Token }}`, which is
+the six-digit code.
+
+Supabase only permits editing templates once SMTP is on, which is why the ready-made
+template is committed to the repository rather than pasted into the dashboard.
+
+### 4. Raise the limit
+
+Saving custom SMTP sets a default of **30 messages per hour**, which is ample for a
+pilot. To change it:
+
+<https://supabase.com/dashboard/project/tdegxxqxrhbtmqcqfwls/auth/rate-limits>
+
+Set *Rate limit for sending emails*. Thirty an hour is more than a handful of
+retailers will ever need.
+
+## What about turning email confirmation off instead?
+
+I mentioned this earlier as a shortcut. On reading Supabase's own guidance it is
+worse than I made it sound, so here it is accurately:
+
+Supabase's documentation explicitly says **"Do not disable email confirmations under
+pressure"**, and describes what happens if you do:
+
+> bots and attackers sign up users to your application using lists of known email
+> addresses... At that point they may target specific or broad ranges of users by
+> creating an account in their name.
+
+With confirmation off, anyone can register as an existing retailer, and password
+reset cannot work at all, because there is no way to prove the address belongs to
+whoever is asking.
+
+Vendra already handles this mode correctly — `signUp` returns a session, the form
+skips the code step and goes to onboarding — so it would work today with one click.
+But it weakens the product for real users, and it should be a decision made
+knowingly rather than as a workaround. For an invite-only pilot with retailers you
+have already spoken to, it is defensible. For anything open to the public, it is not.
+
+If you do choose it, say so in the privacy notice. It changes what "your login and a
+display name" means, because nobody has proved the address is theirs.
+
+## Cost
+
+Supabase: free tier, no change.
+
+Resend: free tier allows 3,000 emails a month and 100 a day. A pilot of a few dozen
+retailers will not come close. Paid plans start when you outgrow that.
 
 ## What is verified and what is not
 
@@ -93,6 +152,6 @@ Verified against the running application, in a browser:
   flow was exercised without a deliverable email.
 
 Not verified, because it cannot be until email actually flows: a **correct** code
-completing the flow and starting a session. That path is
-`verifyCodeAction` → `supabase.auth.verifyOtp`, which is a single documented call,
-but it is not exercised, and it is not claimed.
+completing the flow and starting a session. That path is `verifyCodeAction` →
+`supabase.auth.verifyOtp`, a single documented call, but it is not exercised and it
+is not claimed.
