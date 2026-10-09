@@ -50,6 +50,52 @@ the reset page.
 
 **Add `https://vendra-psycho-projects.vercel.app` to the redirect allow-list.**
 
+## Walrus credentials must be pushed, and the relayer must match
+
+Two environment variables were missing from production, and a third was wrong.
+All three were invisible from the deployed site, which simply showed "deal memory
+is not configured" and disabled the button that completes setup.
+
+`WALRUS_MEMORY_ACCOUNT_ID` and `WALRUS_DELEGATE_PRIVATE_KEY` had never been pushed.
+They were provisioned locally *after* the last push, so the earlier push was
+correct when it ran and silently incomplete afterwards.
+
+`WALRUS_MEMORY_API_URL` was the more interesting one. `.env.local` points at the
+**staging** relayer, `https://relayer-staging.memory.walrus.xyz`, because the Walrus
+Memory account was provisioned on **Sui testnet**. Production was pointed at
+`https://relayer.memory.walrus.xyz`. Every call returned:
+
+```
+walrus_error 401 from relayer: typically wrong private key, key not registered on
+this account, account ID mismatch, or staging/mainnet mismatch
+```
+
+The credentials were fine. The relayer was the wrong one, and the 401 says so in
+its own text. A testnet account and a mainnet relayer cannot authenticate against
+each other however correct the key is.
+
+**Push Walrus variables with an explicit filter, never a blanket push:**
+
+```bash
+node scripts/push-env-to-vercel.mjs --dry-run --only WALRUS_MEMORY_ACCOUNT_ID,WALRUS_DELEGATE_PRIVATE_KEY
+node scripts/push-env-to-vercel.mjs --only WALRUS_MEMORY_ACCOUNT_ID,WALRUS_DELEGATE_PRIVATE_KEY
+```
+
+The script refuses to push a localhost value into production, because
+`.env.local` is the development file and a blanket push would otherwise overwrite
+the production `NEXT_PUBLIC_SITE_URL` with `http://localhost:3000`. That is not
+hypothetical; it is what the unfiltered dry run produced.
+
+**To verify Walrus is actually working in production**, the end-to-end suite
+reports it:
+
+```
+PASS  memory endpoint reports real state :: status=active walrusConfigured=true
+```
+
+`status=pending` means credentials are missing. `status=degraded` means they were
+rejected or the relayer did not respond. Only `active` proves the namespace works.
+
 ## After deploying
 
 ```bash

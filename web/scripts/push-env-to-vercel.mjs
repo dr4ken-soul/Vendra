@@ -7,6 +7,14 @@
  *
  *   node scripts/push-env-to-vercel.mjs --dry-run
  *   node scripts/push-env-to-vercel.mjs
+ *   node scripts/push-env-to-vercel.mjs --only WALRUS_MEMORY_ACCOUNT_ID,WALRUS_DELEGATE_PRIVATE_KEY
+ *
+ * **Prefer --only.** `.env.local` is the development file, so a blanket push copies
+ * development values into production. That is not hypothetical: running this with
+ * no filter would have overwritten the production NEXT_PUBLIC_SITE_URL with
+ * `http://localhost:3000`, which sends every confirmation link back to the
+ * developer's own machine. The guard below refuses that outright rather than
+ * relying on the operator to notice.
  *
  * Three details worth keeping, all of them learned from Vercel's own error
  * messages rather than guessed:
@@ -29,6 +37,14 @@ import { execFileSync } from 'node:child_process';
 
 const raw = fs.readFileSync('.env.local', 'utf8');
 const dryRun = process.argv.includes('--dry-run');
+
+/** `--only A,B` restricts the push to named variables. */
+const onlyArg = process.argv.indexOf('--only');
+const only =
+  onlyArg === -1 ? null : new Set(process.argv[onlyArg + 1].split(',').map((s) => s.trim()));
+
+/** Escape hatch for a deliberate local push, e.g. a preview deployment. */
+const allowLocalhost = process.argv.includes('--allow-localhost');
 
 /**
  * `vercel link` writes VERCEL_OIDC_TOKEN into .env.local. It is a deployment
@@ -71,10 +87,38 @@ for (const line of raw.split('\n')) {
   values[key] = value;
 }
 
-const keys = Object.keys(values).sort();
+/**
+ * Refuse to point production at localhost.
+ *
+ * `NEXT_PUBLIC_SITE_URL` is the base every email link and confirmation redirect is
+ * built from. Setting it to `http://localhost:3000` in production produces a site
+ * whose sign-up email links to the developer's own machine, which is exactly the
+ * failure this project spent a day undoing.
+ */
+function assertNotLocalhost(key, value) {
+  if (allowLocalhost) return;
+  if (!/^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?/i.test(value)) return;
+  console.error(`\nREFUSING to set ${key} to a local address: ${value}`);
+  console.error('That would break production email links and confirmation redirects.');
+  console.error('Pass --allow-localhost only if you mean a preview deployment.');
+  process.exit(1);
+}
+
+let keys = Object.keys(values).sort();
+
+if (only) {
+  const missing = [...only].filter((k) => !values[k]);
+  if (missing.length > 0) {
+    console.error(`not in .env.local, or empty: ${missing.join(', ')}`);
+    process.exit(1);
+  }
+  keys = keys.filter((k) => only.has(k));
+}
+
+for (const key of keys) assertNotLocalhost(key, values[key]);
 
 if (dryRun) {
-  console.log(`would set ${keys.length} variable(s):`);
+  console.log(`would set ${keys.length} variable(s)${only ? ` (filtered to ${[...only].join(', ')})` : ''}:`);
   for (const key of keys) {
     console.log(`  ${key}  (${values[key].length} chars, ${PUBLIC.has(key) ? 'config' : 'secret'})`);
   }
