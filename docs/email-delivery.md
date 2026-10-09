@@ -62,59 +62,79 @@ You need two things:
 - an **API key** — <https://resend.com/api-keys> → *Create API Key*
 - a **verified sending domain** — <https://resend.com/domains> → *Add Domain*
 
-### The domain is not optional
+### The domain is not optional for production, but it is not the current blocker
 
-This was found the hard way. With the sender set to `onboarding@resend.dev`,
-sign-up fails at the send step with `Error sending confirmation email`, and Resend
-rejects the message with:
+An earlier version of this file said the `resend.dev` domain was the reason
+sign-up fails, on the strength of a Resend documentation page. **That was wrong,
+and it was measured wrong.** `scripts/probe-resend-smtp.mjs` speaks SMTP to Resend
+with the same credentials and the same addresses, and Resend answers:
 
-> You can only send testing emails to your own email address
-> (your-email-address@domain.com). To send emails to other recipients, please
-> verify a domain at resend.com/domains, and change the `from` address to an email
-> using this domain.
+```
+< 235 Authentication successful
+> MAIL FROM:<onboarding@resend.dev>
+< 250 Accepted
+> RCPT TO:<vendra-probe@example.test>
+< 250 Accepted
+```
 
-`onboarding@resend.dev` is a testing address. It delivers to the Resend account
-owner's own inbox and nowhere else. It is not a usable production sender, and no
-setting changes that.
+The sender and the recipient are both accepted. The documented `resend.dev`
+restriction did not occur.
 
-The saving grace is that reaching this error proves the SMTP configuration itself
-is working. Supabase stops returning `email_address_invalid` — the address is now
-accepted and a message is handed to the provider. Only the sender is wrong.
+Two things follow. First, no domain is needed to get sign-up working. Second,
+the failure is somewhere Supabase is not disclosing, because Supabase returns a
+generic `Error sending confirmation email` with no code and no detail.
 
-The values are fixed:
+A verified domain is still worth having before inviting anyone outside the team:
+it is the only way the recipient sees a real sender address, and it is what SPF,
+DKIM and DMARC authenticate against. But it is a polish item, not the blocker.
 
-| Field | Value |
+## What is actually known about the failure
+
+| | |
 |---|---|
-| Host | `smtp.resend.com` |
-| Port | `465` for implicit SSL, or `587` for STARTTLS |
-| Username | `resend` |
-| Password | your Resend API key |
-| From address | **must be on your verified domain**, e.g. `no-reply@yourdomain.com` |
+| SMTP is active | Supabase no longer returns `email_address_invalid` |
+| The send is rejected | `Error sending confirmation email`, no code |
+| Resend accepts these credentials | probe: `235 Authentication successful` |
+| Resend accepts this sender to a foreign recipient | probe: `250` on both `MAIL FROM` and `RCPT TO` |
 
-## Why the sender address cannot simply be renamed
+What has **not** been established is why. The gap is that Supabase does not
+surface the provider's error. The authoritative source is **Authentication → Logs**
+in the Supabase dashboard, which records the SMTP exchange.
 
-There is no way to make the recipient see `hello@vendra.com` without owning
-`vendra.com`. Sending infrastructure authenticates the From address with SPF,
-DKIM and DMARC, all of which are DNS records on the sending domain. A domain you
-do not control cannot be authenticated for you, which is precisely what stops
-anyone from sending mail as your business.
+## How to check it in one command
 
-So there are exactly two options for the sender:
+`web/scripts/check-signup-send.mjs` attempts a real sign-up and prints the exact
+Auth error, then deletes the account it created. Run it after every change to the
+SMTP settings:
 
-| | Sender shows as | Works? |
-|---|---|---|
-| No domain | `onboarding@resend.dev` | **No.** Only to your own inbox. |
-| Owned domain | `Vendra <no-reply@yourdomain.com>` | Yes. |
+```bash
+cd web
+node scripts/check-signup-send.mjs
+```
 
-The **display name** is separate from the address and is already set to `Vendra`
-in the sender name field, so many inboxes will render the sender as simply
-"Vendra" either way. That is a mitigation, not a fix: the address is still visible
-in the details pane, and some clients show only the address.
+It separates the cases that look identical from inside the application: the
+built-in sender refusing an address, and SMTP being active with the send failing.
 
-A domain costs a few dollars a year. Cloudflare Registrar sells at cost,
-Namecheap and Porkbun are similar. Once added to Resend with the DNS records it
-asks for, the sender can be `no-reply@yourdomain.com` and mail to any retailer
-works.
+## The provider probe
+
+`web/scripts/probe-resend-smtp.mjs` reports what Resend actually says, without
+sending anything. The key is read from the environment and never printed.
+
+```bash
+$env:RESEND_API_KEY = "re_..."
+node scripts/probe-resend-smtp.mjs
+```
+
+Three bugs in that script are worth recording, because each produced a confident
+wrong answer. It sent `EHLO` before reading the greeting and was told `421 You
+talk too soon`; then it searched only the final line of the multi-line `EHLO`
+reply for `AUTH` and reported that Resend offered no mechanism, when it had
+advertised `AUTH PLAIN LOGIN` three lines earlier. Both were checked against the
+literal transcript before the final run was trusted.
+
+The lesson is the one already recorded below: a plausible match between a
+symptom and a web page is not a finding.
+
 
 ### 2. Enter them in Supabase
 
@@ -203,11 +223,23 @@ from inside the app.
 
 ## A correction worth recording
 
-This file first claimed `onboarding@resend.dev` "delivers to any recipient". That
-was wrong, and it was wrong twice over: the original claim had been right, and it
-was overturned by a documentation page that turned out not to be about the
-restriction. The evidence for the reversal was weaker than the claim it replaced.
+This file went back and forth on the `resend.dev` restriction before landing in the
+wrong place twice. It claimed the address delivered only to the account owner,
+then claimed it delivered to anyone, then claimed the restriction was blocking
+sign-up. Only the first was supported, and it is not supported either: measured
+directly, Resend accepts the address for any recipient.
 
-The correct rule, from Resend's own error documentation, is that the `resend.dev`
-domain sends only to the account owner's own address. Verified by getting the 403.
+What actually happened each time was matching a symptom to a documentation page
+without checking whether the page described the observed behaviour. Twice the
+apparent contradiction between the page and the symptom was resolved by
+re-reading the page rather than by testing.
+
+The measurements themselves were also untrustworthy for three runs, for reasons
+that had nothing to do with Resend: the probe spoke before the server greeted it,
+then lost the capabilities because it read only the last line of a multi-line
+reply. A wrong answer from a tool I wrote is not evidence, however confident its
+output format.
+
+The standing rule for this file: **a plausible match is not a finding.** Say what
+was measured, say what was assumed, and do not let the second become the first.
 
