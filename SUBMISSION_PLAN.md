@@ -3,45 +3,61 @@
 **Challenge:** Walrus Session 8: Chatbots That Remember  
 **Organiser brief:** [DeepSurge challenge page](https://www.deepsurge.xyz/hackathons/c0141a4a-21be-4009-bc63-7c168608c849)  
 **Challenge end date:** 9 October 2026  
-**Planning date:** 6 October 2026  
-**Status:** The application is built and tested. **None of the challenge's usage and evidence requirements are met yet.** This is a checklist with honest state, not a claim of completion.
+**Planning date:** 6 October 2026 · **Last updated:** 9 October 2026  
+**Status:** The application is built, deployed and working end to end, verified by a real person signing up through email. **Every usage and evidence requirement is still unmet.** This is a checklist with honest state, not a claim of completion.
 
-## Where this stands (8 October 2026)
+**Read the deadline first.** The end date is **9 October 2026 — today.** "Deployed and used for a few days" cannot be satisfied by tonight. Nothing below assumes an extension, and none is claimed.
 
-Done:
+## Where this stands (9 October 2026)
 
-- [x] Working application, open-source licensed (MIT), public-repository-ready source
+Done and verified:
+
+- [x] Working application, open-source licensed (MIT), public repository at `github.com/dr4ken-soul/Vendra`
 - [x] Setup instructions and an environment template (`.env.example`)
-- [x] Database schema, RLS policies and private storage migrations written
-- [x] 76 passing unit tests; `tsc`, `eslint`, `next build` all clean
-- [x] Tenant-isolation and Walrus-isolation test suites written
-- [x] Exact model and runtime documented (`gemini-2.5-flash`, `@mysten-incubation/memwal` 0.1.8)
+- [x] Database schema, RLS policies and private storage migrations applied to the live project
+- [x] 107 passing unit tests, 23/23 end-to-end against the deployed build, `tsc`, `eslint`, `next build` clean
+- [x] **Walrus Memory exercised live** — account provisioned on Sui testnet, namespace isolation proved against the relayer, `memory_status = active` in production
+- [x] **Deployed** at `vendra-psycho-projects.vercel.app`, protection off, public routes return 200
+- [x] **Sign-up works for anyone** — custom SMTP through Mailjet, six-digit code *and* confirmation link, both verified by the founder completing a real sign-up
+- [x] Exact model and runtime: `gemini-3.8-flash` through `@ai-sdk/google`, `@mysten-incubation/memwal` 0.1.8
 - [x] Custody disclosure matching the implemented service-managed model
 - [x] Deletion limitation stated plainly instead of claimed
 
-Blocked or not started:
+Not done:
 
-- [ ] **Walrus Memory integration exercised live** — blocked on credentials
-- [ ] **Deployed and used for a few days** — blocked on Supabase project, Gemini key and a Vercel account
-- [ ] **Three consenting users** — no users exist
-- [ ] **Ten stored memories per user** — zero real memories written
-- [ ] **Public GitHub repository** — push pending; source is complete
-- [ ] **500–800 word article** — cannot be written honestly until there is real evidence
-- [ ] **One X post** — the draft in `MARKETING.md` is unchanged and unposted
-- [ ] **Deletion/retention verification** — Security Delete flow not exercised; reported as blocked in the product
+- [ ] **Used for a few days** — one real sign-up, one day. No multi-day evidence.
+- [ ] **Three consenting users** — one person exists, and the brief forbids counting one person's multiple accounts as three users.
+- [ ] **Ten stored memories per user** — zero real memories written by a user.
+- [ ] **500–800 word article** — cannot be written honestly until there is real multi-user evidence.
+- [ ] **One X post** — draft in `MARKETING.md`, unposted.
+- [ ] **Deletion/retention verification** — the Walrus Security Delete flow is unexercised and the product reports that layer as blocked.
 
 ## Official requirement checklist
 
-- [ ] **Walrus Memory integration:** Vendra writes and recalls actual memories through Walrus Memory. Record package/version, owner-account setup, namespace and relevant request/job IDs.
-- [ ] **Deployed and used for a few days:** publish the app to a reachable deployment and record actual use dates. A local demo or screenshot alone is not enough.
-- [ ] **At least three different users:** recruit three consenting users who use distinct shop scopes. Do not count the same person’s multiple accounts as separate users.
-- [ ] **At least ten stored memories per user:** each memory must be genuine and useful to that user. Retain evidence of the count and the account/namespace mapping. Synthetic fixtures do not count.
-- [ ] **Public open-source GitHub repository:** publish source under an approved open-source licence and include tested setup instructions, environment template, model/runtime details and tests.
-- [ ] **500–800 word Medium or Inkray article:** write after the test. Include real before/after behaviour, real usage evidence and honest limits.
-- [ ] **One X post:** publish exactly one original post, tag `@WalrusProtocol` and include `#WalrusMemory`. The draft is in `MARKETING.md`. No thread or alternative drafts.
-- [ ] **Model/runtime disclosure:** name the exact model and version plus runtime/integration used. Gemini is a candidate only; do not write “Gemini” as an implemented fact until the model is actually integrated.
-- [ ] **Consent and privacy:** obtain participant consent for tests and public screenshots/quotes. Redact personal, supplier and commercial information.
-- [ ] **Deletion/retention disclosure:** verify the wallet-signed Walrus Security Delete flow and state limitations honestly. Do not promise deletion until verified.
+- [x] **Walrus Memory integration.** Vendra writes and recalls actual memories through Walrus Memory. `@mysten-incubation/memwal` 0.1.8; account on Sui testnet; one namespace per shop, server-assigned and never accepted from a client; 6/6 namespace-isolation tests pass against the live relayer.
+- [ ] **Deployed and used for a few days.** Deployed and reachable, and used once. The multi-day requirement is unmet.
+- [ ] **At least three different users.** None recruited. The brief states: *do not count the same person's multiple accounts as separate users.*
+- [ ] **At least ten stored memories per user.** Zero. The brief states synthetic fixtures do not count.
+- [x] **Public open-source GitHub repository.** MIT, pushed, with setup instructions, `.env.example`, model/runtime details and tests.
+- [ ] **500–800 word Medium or Inkray article.** Not written.
+- [ ] **One X post.** Not posted.
+- [x] **Model/runtime disclosure.** `gemini-3.8-flash` through `@ai-sdk/google`; Walrus Memory through `@mysten-incubation/memwal` 0.1.8.
+- [ ] **Consent and privacy.** No participants yet, so no consent obtained.
+- [ ] **Deletion/retention disclosure.** Not verified; stated as blocked in the product.
+
+## The two requirements that cannot be self-generated
+
+Everything above is engineering, and it is done. The two that remain both depend on
+other people, and the brief rules out manufacturing either:
+
+1. **Three different users.** Three consenting people, each with their own shop.
+   One person with three accounts is explicitly disallowed.
+2. **Ten genuine memories each.** These accumulate from real use. They cannot be
+   filled in as fixtures, and doing so would be fabricated evidence.
+
+Everything the founder can do alone — recruit three people, have each record real
+supplier deals over a few days, then write the article and post once — is already
+supported by the deployment. Nothing further needs building for that to work.
 
 ## Evidence log template
 
@@ -63,7 +79,7 @@ Create a dated, access-controlled record for each test participant. Use pseudony
 
 ## Article outline: 500–800 words
 
-**Working title:** *What a shop’s last supplier deal can teach its next order*  
+**Working title:** *What a shop's last supplier deal can teach its next order*  
 The title and article are a plan, not a published result. Draft only after real testing.
 
 | Section | Target words | Evidence to use |
@@ -76,7 +92,7 @@ The title and article are a plan, not a published result. Draft only after real 
 | 6. What failed or remains hard | 100–130 | Include actual onboarding, retrieval, deletion, latency, privacy or model limitations. If there was no failure, describe an observed limitation instead of inventing one. |
 | 7. What happens next | 50–70 | Identify the next product test and the conditions for keeping or changing the design. Avoid unvalidated market or impact claims. |
 
-This outline totals 600–800 words. The published article must fall within the organiser’s 500–800 word requirement. Add the public repo and live demo links only when they work. Use original screenshots with consent and redact names, phone numbers, prices and supplier-identifying details unless explicitly approved.
+This outline totals 600–800 words. The published article must fall within the organiser's 500–800 word requirement. Add the public repo and live demo links only when they work. Use original screenshots with consent and redact names, phone numbers, prices and supplier-identifying details unless explicitly approved.
 
 ## Submission fact-check
 
@@ -95,4 +111,9 @@ Before publishing, verify each statement against evidence:
 
 ## Schedule risk
 
-As of 6 October 2026, three calendar days remain before the stated challenge end date. The required deployment and “few days” use make the timeline particularly tight. If the app is not already built and used, do not claim compliance or fabricate evidence. Confirm with the organiser whether a late submission or extension is possible; this plan does not assume one.
+The end date is 9 October 2026. A deployment plus several days of real use cannot
+be compressed into the hours remaining, and the three-user requirement cannot be
+self-satisfied at all. **Contact the organiser now** about a late submission or
+extension. Submitting with the engineering complete and the usage evidence missing
+is a weaker entry than waiting, and claiming usage that did not happen would be a
+false one.

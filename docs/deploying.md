@@ -2,26 +2,40 @@
 
 ## The Vercel Root Directory must be `web`
 
-This is the setting that silently breaks every deployment, and it cost fifteen
-hours of the site being stale.
+**Project name and Root Directory are two different settings.** The project is
+correctly named `vendra`. The Root Directory is `.`, which is the repository root,
+and it is wrong because the Next.js app lives in `web/`.
 
-The Next.js app is in `web/`, not at the repository root. With the Vercel
-project's Root Directory left at the repository root, the build runs `next build`
-in a directory with no `app/` folder and fails in about seven seconds:
+```
+$ npx vercel project inspect vendra
+  Name             vendra          <- correct
+  Root Directory   .               <- wrong, should be "web"
+```
+
+With the Root Directory at `.`, a GitHub-connected deploy clones the whole
+repository and runs `next build` in a directory with no `app/` folder:
 
 ```
 > Couldn't find any `pages` or `app` directory. Please create one under the project root
 ```
 
-The failure is fast and total, which is the only reason it was easy to miss: the
-live site keeps serving the last build that succeeded, so nothing looks broken
-until you check what is actually deployed.
+Deploying from inside `web/` with `npx vercel --prod` succeeds anyway, because the
+CLI uploads the *contents* of the current directory as the deployment root and
+does not consult the project's Root Directory setting. That is why manual deploys
+work and automatic ones do not, and it is a trap: the site looks fine right up
+until someone pushes and nothing happens.
 
-Set Root Directory to `web` in the Vercel project settings, or deploy from inside
-`web/` with `npx vercel --prod`, which uses the linked project in `web/.vercel`.
+**This must be fixed in the dashboard.** The Vercel CLI has no command for it —
+`vercel project` offers add, inspect, list, members, protection and web-analytics,
+and no edit. Until it is set, every GitHub auto-deploy fails in about seven
+seconds and the live site silently serves the last successful build.
 
-**How to tell the deployed build is stale, without reading code.** The confirmation
-route distinguishes its two link shapes:
+Verify it took effect by pushing a commit and confirming a Ready deployment
+appears, rather than by assuming.
+
+## How to tell the deployed build is stale
+
+The confirmation route distinguishes its two link shapes:
 
 | Request | Old build | Current build |
 |---|---|---|
