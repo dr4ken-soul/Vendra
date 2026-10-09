@@ -108,3 +108,5 @@ demo/public/mix.wav
 demo/analysis/voiceover/audio/*.pcm
 demo/analysis/voiceover/audio/*.wav
 demo/public/screens/*.png
+demo/music/sourced/*.mp3
+demo/music/sourced/*.wav
