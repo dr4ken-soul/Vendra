@@ -7,11 +7,19 @@
  * records that could be mistaken for real retailer data.
  *
  * It refuses to touch anything that does not look like a test account unless
- * --force-all is passed.
+ * BOTH --force-all and --confirm-delete-real-accounts are passed.
  *
- *   node scripts/clean-test-data.mjs              # test accounts only
- *   node scripts/clean-test-data.mjs --force-all  # everything
+ *   node scripts/clean-test-data.mjs                    # test accounts only
  *   node scripts/clean-test-data.mjs --dry-run
+ *   node scripts/clean-test-data.mjs --force-all --confirm-delete-real-accounts
+ *
+ * **Two flags, deliberately.** `--force-all` alone used to be enough, and that was
+ * used to delete the founder's own live accounts and their shop while tidying up
+ * after a test run. The accounts looked like leftovers because they had just been
+ * listed by verify:clean, and the habit of cleaning up after a test run was
+ * stronger than any thought about the founder. One flag was too easy to reach for
+ * while thinking about something else, so destroying real data now needs a second
+ * flag that cannot be typed by accident and says what it does.
  */
 import fs from 'node:fs';
 import { createClient } from '@supabase/supabase-js';
@@ -30,6 +38,7 @@ for (const line of raw.split('\n')) {
 
 const dryRun = process.argv.includes('--dry-run');
 const forceAll = process.argv.includes('--force-all');
+const confirmedRealAccounts = process.argv.includes('--confirm-delete-real-accounts');
 
 const admin = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, {
   auth: { persistSession: false },
@@ -45,6 +54,18 @@ if (listError) {
 }
 
 const users = userData.users ?? [];
+const realAccounts = users.filter((u) => !isTest(u.email));
+const willDeleteRealAccounts = forceAll && realAccounts.length > 0;
+
+if (willDeleteRealAccounts && !confirmedRealAccounts) {
+  console.error(`\nREFUSING to delete ${realAccounts.length} real account(s).`);
+  console.error('These are not test accounts and their shops contain real records:\n');
+  for (const user of realAccounts) console.error(`  ${user.email}`);
+  console.error('\nIf you are certain these should go, re-run with:');
+  console.error('  --force-all --confirm-delete-real-accounts');
+  process.exit(1);
+}
+
 const targets = forceAll ? users : users.filter((u) => isTest(u.email));
 const skipped = users.length - targets.length;
 
@@ -55,7 +76,7 @@ if (skipped > 0) {
   for (const user of users.filter((u) => !targets.includes(u))) {
     console.log(`  ${user.email}`);
   }
-  console.log('\nPass --force-all to delete these as well.');
+  console.log('\nPass --force-all --confirm-delete-real-accounts to delete these as well.');
 }
 
 if (targets.length === 0) {

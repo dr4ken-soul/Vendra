@@ -332,8 +332,31 @@ export function Dialog({
 }) {
   const titleId = useId();
   const panelRef = useRef<HTMLDivElement>(null);
+  const bodyRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
   const previousFocus = useRef<HTMLElement | null>(null);
+
+  /**
+   * `onClose` and `disableEscape` are held in refs so the lifecycle effect below
+   * can depend on `open` alone.
+   *
+   * Every call site in this app passes an inline arrow, so depending on `onClose`
+   * meant a new function identity on every render. The effect therefore tore down
+   * and re-ran on every parent re-render — and every parent re-render included
+   * every keystroke in a field inside the dialog. Typing one character re-ran the
+   * effect, which re-ran the autofocus and moved focus off the input. You could
+   * type one character and then nothing, in all twelve dialogs in the app.
+   *
+   * The refs are synced in an effect rather than assigned during render, because
+   * writing a ref during render is not safe when React discards a render.
+   */
+  const onCloseRef = useRef(onClose);
+  const disableEscapeRef = useRef(disableEscape);
+
+  useEffect(() => {
+    onCloseRef.current = onClose;
+    disableEscapeRef.current = disableEscape;
+  }, [onClose, disableEscape]);
 
   useEffect(() => {
     if (!open) return;
@@ -341,15 +364,33 @@ export function Dialog({
     previousFocus.current = document.activeElement as HTMLElement | null;
     const { overflow } = document.body.style;
     document.body.style.overflow = 'hidden';
-    // Initial focus on the heading, falling back to the close control.
+
+    /**
+     * Where focus goes when the dialog opens.
+     *
+     * In order: whatever the caller marked with `data-autofocus`, then the first
+     * real control in the dialog's body, then the heading.
+     *
+     * The heading used to be marked, so opening any form dialog put focus on a
+     * `tabindex="-1"` heading rather than the first field, and the user had to Tab
+     * to reach what they came to type into. The close button is deliberately not
+     * preferred: it sits in the header, before the body in the DOM, so querying
+     * the panel for the first focusable control would always return it.
+     */
     const autofocusTarget = panelRef.current?.querySelector<HTMLElement>('[data-autofocus]');
-    if (autofocusTarget) autofocusTarget.focus();
-    else closeRef.current?.focus();
+    if (autofocusTarget) {
+      autofocusTarget.focus();
+    } else {
+      const firstControl = bodyRef.current?.querySelector<HTMLElement>(
+        'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      );
+      (firstControl ?? closeRef.current)?.focus();
+    }
 
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape' && !disableEscape) {
+      if (event.key === 'Escape' && !disableEscapeRef.current) {
         event.preventDefault();
-        onClose();
+        onCloseRef.current();
         return;
       }
       if (event.key !== 'Tab') return;
@@ -376,7 +417,7 @@ export function Dialog({
       document.body.style.overflow = overflow;
       previousFocus.current?.focus();
     };
-  }, [open, onClose, disableEscape]);
+  }, [open]);
 
   return (
     <AnimatePresence>
@@ -406,7 +447,6 @@ export function Dialog({
               <div className="min-w-0">
                 <h2
                   id={titleId}
-                  data-autofocus
                   tabIndex={-1}
                   className="font-display text-xl font-semibold tracking-[-0.02em] text-[var(--text-primary)] focus:outline-none"
                 >
@@ -430,7 +470,7 @@ export function Dialog({
               </button>
             </div>
 
-            <div className="mt-5">{children}</div>
+            <div ref={bodyRef} className="mt-5">{children}</div>
 
             {footer && (
               <div className="mt-6 flex flex-col-reverse gap-3 border-t border-[var(--border-subtle)] pt-4 sm:flex-row sm:justify-end">

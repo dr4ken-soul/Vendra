@@ -420,7 +420,13 @@ export function DealCaptureWizard({
                 </Button>
               </div>
 
-              <Field label="Deal date" htmlFor="dealDate" required error={fieldErrors.dealDate}>
+              <Field
+                label="Date of this deal"
+                htmlFor="dealDate"
+                required
+                help="When the supplier quoted you. The expected delivery date is a separate field in the next step."
+                error={fieldErrors.dealDate}
+              >
                 <TextInput
                   id="dealDate"
                   type="date"
@@ -704,7 +710,7 @@ export function DealCaptureWizard({
               </h2>
               <dl className="mt-4 flex flex-col">
                 <ReviewRow label="Supplier" value={supplier?.display_name ?? 'Not chosen'} />
-                <ReviewRow label="Deal date" value={dealDate} />
+                <ReviewRow label="Date of this deal" value={dealDate} />
                 <ReviewRow label="Summary" value={effectiveHeadline || 'Not recorded'} />
                 <ReviewRow
                   label="Terms"
