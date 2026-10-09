@@ -1,0 +1,24 @@
+{
+    "name":  "vendra-demo",
+    "version":  "1.0.0",
+    "description":  "",
+    "main":  "index.js",
+    "scripts":  {
+                    "still":  "remotion still src/index.ts VendraFilm out/frame.png",
+                    "render":  "remotion render src/index.ts VendraFilm out/vendra-demo.mp4 --codec=h264 --crf=18",
+                    "start":  "remotion studio src/index.ts"
+                },
+    "keywords":  [
+
+                 ],
+    "author":  "",
+    "license":  "ISC",
+    "type":  "module",
+    "dependencies":  {
+                         "@remotion/cli":  "^4.0.534",
+                         "@remotion/google-fonts":  "^4.0.534",
+                         "react":  "^19.3.0",
+                         "react-dom":  "^19.3.0",
+                         "remotion":  "^4.0.534"
+                     }
+}

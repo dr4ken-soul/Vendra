@@ -95,3 +95,11 @@ video/*.webm
 # control. Public evidence is redacted and placed in docs/ deliberately.
 docs/evidence-local/
 *.heic
+
+# ---------------------------------------------------------------------------
+# Demo film
+# ---------------------------------------------------------------------------
+# The rendered mp4 is a deliverable and is large. It belongs in a release or a
+# submission rather than in version control.
+demo/out/
+demo/.remotion/
