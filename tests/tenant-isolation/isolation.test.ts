@@ -64,11 +64,40 @@ async function buildShop(label: string): Promise<TestShop> {
   }
   createdShopIds.push(shop.id as string);
 
-  await admin.from('shop_memberships').insert({
+  /**
+   * Permissions are stated, never defaulted.
+   *
+   * Migration 00012 dropped the default on this column and made it NOT NULL. The
+   * insert below originally passed only shop_id, user_id and role, so after that
+   * migration it failed silently, this user ended up with no membership, and RLS
+   * correctly returned zero rows — which surfaced as four failures reading
+   * "expected [] to contain <shop>".
+   *
+   * That failure mode is worth being explicit about, because it reads like the
+   * dangerous version: it looks like RLS stopped protecting data. It did not.
+   * The user had no membership at all, and RLS was doing exactly what it should.
+   * Both application insert sites always passed permissions, so the app was
+   * never affected — only this harness. See scripts/probe-membership-permissions.mjs.
+   */
+  const { data: ownerPermissions, error: permsError } = await admin.rpc(
+    'default_permissions_for_role',
+    { p_role: 'owner' },
+  );
+  if (permsError || !ownerPermissions) {
+    throw new Error(`Failed to resolve owner permissions: ${permsError?.message ?? 'no rows'}`);
+  }
+
+  const { error: membershipError } = await admin.from('shop_memberships').insert({
     shop_id: shop.id,
     user_id: ownerId,
     role: 'owner',
+    permissions: ownerPermissions,
   });
+  if (membershipError) {
+    // Previously unchecked, which is why the four failures presented as an RLS
+    // problem rather than as a failed insert.
+    throw new Error(`Failed to create test membership: ${membershipError.message}`);
+  }
 
   const { data: supplier } = await admin
     .from('suppliers')
