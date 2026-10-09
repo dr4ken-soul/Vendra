@@ -9,8 +9,8 @@ import {
   signUpAction,
   verifyCodeAction,
   resendCodeAction,
-  type AuthFormState,
 } from '@/lib/auth-actions';
+import type { AuthFormState } from '@/lib/auth-errors';
 import { Button, Field, TextInput, ErrorMessage, SuccessMessage, InfoMessage } from '@/components/app/ui';
 import { OtpInput, codeDigits } from '@/components/auth/OtpInput';
 import { isEmailShaped } from '@/lib/auth-redirect';

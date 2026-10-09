@@ -14,23 +14,8 @@ import { revalidatePath } from 'next/cache';
 import { createServerClient } from '@supabase/ssr';
 import { z } from 'zod';
 import { publicEnv } from '@/lib/env';
+import { describeAuthError, type AuthFormState } from '@/lib/auth-errors';
 
-export interface AuthFormState {
-  error: string | null;
-  message: string | null;
-  /**
-   * Which step the form should be on.
-   *
-   * `code` means sign-up succeeded and a verification code was sent. The form
-   * moves itself rather than sniffing `message` for a phrase, because that would
-   * make a copy change break the flow.
-   *
-   * `verified` means a session now exists and the router should refresh.
-   */
-  stage?: 'details' | 'code' | 'verified';
-  /** The address the code was sent to, so the form can show it back. */
-  email?: string;
-}
 
 const signInSchema = z.object({
   email: z.string().trim().toLowerCase().email('Enter a valid email address.'),
@@ -89,86 +74,6 @@ async function sessionClient() {
 
 function siteUrl(): string {
   return process.env.NEXT_PUBLIC_SITE_URL ?? 'http://localhost:3000';
-}
-
-/**
- * Turn a Supabase Auth error into something a retailer can act on.
- *
- * Matching is done on the stable `code` field, not on the human-readable
- * message. The message embeds the user's own input, so a substring test on it
- * will eventually match something the user typed: an earlier version tested for
- * "otp", and a test account whose address contained those three letters was told
- * its verification code was wrong when the real problem was that the project
- * cannot send mail to it. A retailer called "Coptic Provisions" would have been
- * shown the same nonsense.
- *
- * `email_address_invalid` and `over_email_send_rate_limit` are called out
- * separately because neither is the user's fault and no amount of retrying helps.
- * Supabase's built-in email sender allows two messages an hour for the whole
- * project and, since September 2024, only delivers to members of the Supabase
- * organisation. Saying "try again" would be a lie.
- */
-function describeAuthError(
-  error: { code?: string; message: string },
-  context: 'signin' | 'signup' | 'verify' | 'resend',
-): AuthFormState {
-  const code = error.code ?? '';
-
-  if (code === 'over_email_send_rate_limit' || /email rate limit/i.test(error.message)) {
-    return {
-      error:
-        context === 'verify'
-          ? 'Too many attempts. Wait a minute, then enter the code again.'
-          : 'Vendra cannot send verification email right now. Supabase’s built-in email sender is limited to two messages an hour for the whole project and delivers only to the operator’s own address. An email service needs to be connected before new retailers can sign up.',
-      message: null,
-    };
-  }
-
-  if (code === 'email_address_invalid' || /is invalid/i.test(error.message)) {
-    return {
-      error:
-        'Vendra cannot send verification email to that address right now. Supabase’s built-in email sender only delivers to the operator’s own email address, so an email service has to be connected before new retailers can sign up.',
-      message: null,
-    };
-  }
-
-  // OTP failures only make sense on the code step.
-  if (
-    context !== 'signin' &&
-    (code === 'otp_expired' ||
-      code === 'access_denied' ||
-      /token has expired|invalid token/i.test(error.message))
-  ) {
-    return {
-      error: 'That code is not right, or it has expired. Check the newest email and enter that code.',
-      message: null,
-    };
-  }
-
-  if (code === 'user_already_exists' || /already registered|already been registered/i.test(error.message)) {
-    return {
-      error: 'An account already uses that email address. Sign in instead.',
-      message: null,
-    };
-  }
-
-  if (code === 'invalid_credentials' || /invalid login credentials/i.test(error.message)) {
-    return {
-      error: 'That email and password did not match. Check them and try again.',
-      message: null,
-    };
-  }
-
-  if (code === 'email_not_confirmed') {
-    return {
-      error:
-        'That account still needs its email confirmed. Enter the six-digit code we sent, or send it again.',
-      message: null,
-      stage: 'code',
-    };
-  }
-
-  return { error: 'We could not do that just now. Try again.', message: null };
 }
 
 export async function signInAction(
