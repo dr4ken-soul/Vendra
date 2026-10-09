@@ -120,6 +120,22 @@ const send = (line) => {
 const plain = (line) => socket.write(`${line}\r\n`);
 
 /**
+ * Escape a body so its own periods cannot be read as the end-of-data marker.
+ *
+ * RFC 5321 requires a period at the *start* of a line to be doubled, and nothing
+ * else. Replacing every period in the body also rewrites the domains, so
+ * `onboarding@resend.dev` becomes `onboarding@resend..dev` and the server
+ * rejects the From header as malformed. That is what an earlier version did, and
+ * the resulting 550 said nothing about the account.
+ */
+function stuffDots(body) {
+  return body
+    .split('\r\n')
+    .map((line) => (line.startsWith('.') ? `.${line}` : line))
+    .join('\r\n');
+}
+
+/**
  * Consume complete replies.
  *
  * A reply ends at a line shaped `NNN ` — three digits then a space. Lines ending
@@ -309,7 +325,7 @@ function handle(capabilities = '') {
         return finish();
       }
       stage = 6;
-      plain(message.replace(/\./g, '..'));
+      plain(stuffDots(message));
       plain('.');
       return;
 
