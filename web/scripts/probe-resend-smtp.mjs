@@ -69,7 +69,15 @@ let stage = 0;
 let buffer = '';
 let code = 0;
 let message = '';
-let capabilities = '';
+/**
+ * Every line of the current reply, joined.
+ *
+ * Capabilities arrive as a multi-line reply and AUTH is usually not on the last
+ * line, so keeping only the final line loses it. An earlier version of this probe
+ * did exactly that and then reported that Resend offered no AUTH mechanism, which
+ * was false: Resend had advertised AUTH PLAIN LOGIN two lines up.
+ */
+let reply = '';
 
 const send = (line) => {
   console.log(`> ${line.replace(/AUTH PLAIN .*/, 'AUTH PLAIN [redacted]')}`);
@@ -94,6 +102,10 @@ function drain() {
     code = Number(line.slice(0, 3));
     message = line.slice(4);
 
+    // A line ending in `-` continues the reply, so the next line's code is
+    // informational rather than the response.
+    reply += `${reply ? '\n' : ''}${line}`;
+
     if (line[3] !== ' ') continue; // continuation line, not the end of the reply
 
     handle();
@@ -117,17 +129,18 @@ function handle() {
         console.log(`\nEHLO refused: ${code} ${message}`);
         return finish();
       }
-      capabilities = message;
       stage = 2;
 
-      // Resend advertises AUTH PLAIN and AUTH LOGIN. PLAIN is one round trip.
-      if (/AUTH\s+PLAIN/i.test(capabilities)) {
+      // Search the whole reply, not just its final line. AUTH is a capability and
+      // capabilities come back as a multi-line reply.
+      if (/^\s*250[- ]AUTH\s+PLAIN\b/im.test(reply)) {
         send(`AUTH PLAIN ${Buffer.from(`\0resend\0${apiKey}`).toString('base64')}`);
-      } else if (/AUTH\s+LOGIN/i.test(capabilities)) {
+      } else if (/^\s*250[- ]AUTH\s+LOGIN\b/im.test(reply)) {
         stage = 2.5;
         send('AUTH LOGIN');
       } else {
-        console.log('\nthe server offers no AUTH mechanism it will accept');
+        console.log('\nthe server advertised no usable AUTH mechanism');
+        console.log(`it offered:\n${reply}`);
         return finish();
       }
       return;
