@@ -72,9 +72,16 @@ console.log(`server    smtp.resend.com:${port} (${implicitTls ? 'implicit TLS' :
 console.log(`body      ${sendData ? 'sent - this delivers a real message' : 'not sent'}`);
 console.log('');
 
-/** A body shaped like what Supabase actually submits. */
+/**
+ * A body shaped like what Supabase actually submits.
+ *
+ * The From header must be the same address as the MAIL FROM envelope sender.
+ * Resend checks the two against each other, so a header naming a different
+ * address is rejected with 550 even when the envelope was accepted, and the
+ * rejection says nothing about the account or the credentials.
+ */
 const message = [
-  'From: Vendra <noreply@resend.dev>',
+  `From: Vendra <${fromAddress}>`,
   `To: ${toAddress}`,
   'Subject: Your Vendra sign-up code',
   'Date: Thu, 09 Oct 2026 12:00:00 +0000',
@@ -89,6 +96,8 @@ let stage = 0;
 let buffer = '';
 /** True once STARTTLS has been issued, so the upgrade is never attempted twice. */
 let upgraded = false;
+/** True once the encrypted channel is live, so a re-greeting can be recognised. */
+let afterTls = false;
 let code = 0;
 let message_ = '';
 /**
@@ -144,6 +153,13 @@ function drain() {
 }
 
 function handle(capabilities = '') {
+  // A 220 arriving after the STARTTLS upgrade is a re-greeting, not an answer to
+  // anything. The EHLO has already gone out, so acknowledge and wait for it.
+  if (stage === 1 && afterTls && code === 220) {
+    console.log('  [re-greeting received, waiting for the EHLO reply]');
+    return;
+  }
+
   switch (stage) {
     case 0:
       if (code !== 220) {
@@ -204,10 +220,18 @@ function handle(capabilities = '') {
         },
       );
       attach(socket);
-      // The server greets again on the encrypted channel, so the dialogue
-      // restarts from the top.
-      stage = 0;
-      buffer = '';
+
+      // RFC 3207 lets the server either send a fresh 220 greeting after the
+      // handshake or say nothing and wait for the client to speak. Resend does
+      // the latter, so waiting for a greeting hangs until the timeout. Send EHLO
+      // as soon as the handshake completes, and tolerate a greeting if one
+      // arrives anyway.
+      socket.once('secureConnect', () => {
+        console.log('  [TLS established, no re-greeting expected]');
+        afterTls = true;
+        stage = 1;
+        send('EHLO vendra.probe');
+      });
       return;
     }
 
