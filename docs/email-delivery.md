@@ -64,7 +64,7 @@ You need two things:
 
 ### The domain is the blocker, and it was measured at DATA, not at RCPT
 
-The cause is confirmed. `scripts/probe-resend-smtp.mjs --port 587 --data` gets a
+The cause is confirmed. `scripts/probe-smtp.mjs --port 587 --data` gets a
 complete message as far as the provider, and Resend refuses it:
 
 ```
@@ -132,12 +132,21 @@ node scripts/check-signup-send.mjs
 
 ## The provider probe
 
-`web/scripts/probe-resend-smtp.mjs` reports what Resend actually says. The key is
+`web/scripts/probe-smtp.mjs` reports what the provider actually says. The password is
 read from the environment and never printed.
 
 ```bash
 $env:RESEND_API_KEY = "re_..."
-node scripts/probe-resend-smtp.mjs --port 587 --data
+node scripts/probe-smtp.mjs --port 587 --data
+```
+
+The variable name is historical. `--host` and `--user` make the probe work against
+any provider, so a candidate can be measured before it is adopted:
+
+```bash
+$env:RESEND_API_KEY = "<that provider's SMTP key or app password>"
+node scripts/probe-smtp.mjs --host smtp.example.com --user you \
+                  --port 587 --from you@example.com --to probe@example.test --data
 ```
 
 `--data` is not optional in practice. Without it the probe stops at `RCPT TO`,
@@ -235,6 +244,50 @@ Supabase: free tier, no change.
 
 Resend: free tier allows 3,000 emails a month and 100 a day. A pilot of a few dozen
 retailers will not come close. Paid plans start when you outgrow that.
+
+## When a domain cannot be bought
+
+The constraint is real and it is not always solvable with money, so this section
+records the ways out that do not involve paying for one.
+
+**Supabase's built-in sender.** Free, and it sends two emails an hour, but only to
+addresses belonging to the Supabase organisation's team. Useless for retailers.
+
+**Providers that will accept a single verified address rather than a domain.**
+This is the option worth checking, because it removes the domain requirement
+entirely. Whether a given provider allows it changes, and it is not something to
+guess at — measure it with `scripts/probe-smtp.mjs --data` before configuring
+Supabase, and read the provider's own sender-verification documentation rather
+than a comparison article.
+
+**A domain that costs nothing.** Free and low-cost registrations exist. Their
+catch is that some registrars require a card for verification even at a zero
+price, so "free" does not always mean "no payment details".
+
+**Turning email confirmation off.** Supabase can be set to skip confirmation
+entirely. See the section above for the security trade-off. It is the only option
+here that requires nothing from anyone, and it is the weakest.
+
+**Send the code some other way.** Only relevant for a pilot small enough that the
+founder can hand it over. It does not scale past a handful of people and should
+not be mistaken for a solution.
+
+### What was verified, and what was not
+
+Measured directly:
+
+- Resend refuses `DATA` from `onboarding@resend.dev` to any recipient other than
+  the account owner's address. That is the blocker, and it is not a bug.
+- Sign-up **succeeds** when the recipient is the account owner's own address. Run:
+  `node scripts/check-signup-send.mjs <your-own-address>`.
+
+Not measured, and therefore not claimed:
+
+- whether Brevo, Mailjet or any other free provider accepts a single verified
+  address instead of a domain. Their pricing pages were read; their sender
+  verification rules were not confirmed, and one Brevo page explicitly
+  contradicted the marketing page on whether a domain is needed. `probe-smtp.mjs`
+  exists so this can be settled by measurement rather than by argument.
 
 ## What is verified and what is not
 

@@ -1,17 +1,23 @@
 /**
- * Speak SMTP to Resend the way Supabase does, and report what comes back.
+ * Speak SMTP the way Supabase does, and report what comes back.
  *
  * Supabase swallows the provider's error and returns a generic
  * "Error sending confirmation email", so the cause has to be established by
  * talking to the provider directly. This is a diagnostic, not a workaround.
  *
- * Your API key never has to be shared. It is read from the environment and only
+ * The password never has to be shared. It is read from the environment and only
  * its length is printed.
  *
- *   $env:RESEND_API_KEY = "re_..."                  # PowerShell
- *   node scripts/probe-resend-smtp.mjs
- *   node scripts/probe-resend-smtp.mjs --port 587
- *   node scripts/probe-resend-smtp.mjs --data
+ *   $env:RESEND_API_KEY = "re_..."              # PowerShell, name is historical
+ *   node scripts/probe-smtp.mjs                 # Resend, port 465
+ *   node scripts/probe-smtp.mjs --port 587 --data
+ *   node scripts/probe-smtp.mjs --host smtp.gmail.com --user you@gmail.com \
+ *                             --port 587 --from you@gmail.com --data
+ *
+ * Any provider can be measured this way. --host and --user exist so a candidate
+ * can be tested before anything is committed to it, rather than adopted on the
+ * strength of a pricing page. The environment variable is still called
+ * RESEND_API_KEY because that is what the shell already had set.
  *
  * Protocol notes, because getting this wrong produces a misleading answer:
  *
@@ -21,11 +27,12 @@
  *     with a space after the code rather than a hyphen, which is where the
  *     EHLO capability list lives.
  *   - On 587 the connection starts in the clear and is upgraded with STARTTLS.
- *     After the upgrade the server sends a fresh greeting, so the whole
- *     greeting/EHLO sequence happens again.
- *   - Nothing is sent unless --data is passed. Reaching RCPT TO proves the
- *     envelope is acceptable but says nothing about whether the body is, and
- *     the body is only answered after the terminating dot.
+ *     The server may then greet again or say nothing and wait, so EHLO goes out
+ *     as soon as the handshake completes.
+ *   - Nothing is sent unless --data is passed, and RCPT TO is not the answer.
+ *     RCPT TO proves the envelope was accepted; several providers defer the real
+ *     recipient question to DATA. Stopping early is how this script once reported
+ *     that a test sender could reach anyone.
  */
 
 import net from 'node:net';
@@ -41,6 +48,18 @@ const port = Number(argOf('--port') ?? 465);
 const fromAddress = argOf('--from') ?? 'onboarding@resend.dev';
 const toAddress = argOf('--to') ?? 'vendra-probe@example.test';
 const sendData = process.argv.includes('--data');
+
+/**
+ * Any provider, not just Resend.
+ *
+ * The blocker is the same wherever it is configured: does this server accept a
+ * message from this sender to this recipient? That question is asked over SMTP,
+ * and SMTP does not care whose server it is. So --host and --user exist so that
+ * a candidate can be measured before anything is committed to it, instead of
+ * being adopted on the strength of a pricing page.
+ */
+const host = argOf('--host') ?? 'smtp.resend.com';
+const user = argOf('--user') ?? 'resend';
 
 if (!apiKey) {
   console.error('RESEND_API_KEY is not set. Export it for this shell only:');
@@ -65,10 +84,11 @@ if (port !== 465 && port !== 587) {
 
 const implicitTls = port === 465;
 
-console.log(`key       set (${apiKey.length} chars)`);
+console.log(`password  set (${apiKey.length} chars)`);
+console.log(`user      ${user}`);
 console.log(`from      ${fromAddress}`);
 console.log(`to        ${toAddress}`);
-console.log(`server    smtp.resend.com:${port} (${implicitTls ? 'implicit TLS' : 'STARTTLS'})`);
+console.log(`server    ${host}:${port} (${implicitTls ? 'implicit TLS' : 'STARTTLS'})`);
 console.log(`body      ${sendData ? 'sent - this delivers a real message' : 'not sent'}`);
 console.log('');
 
@@ -76,7 +96,7 @@ console.log('');
  * A body shaped like what Supabase actually submits.
  *
  * The From header must be the same address as the MAIL FROM envelope sender.
- * Resend checks the two against each other, so a header naming a different
+ * Providers check the two against each other, so a header naming a different
  * address is rejected with 550 even when the envelope was accepted, and the
  * rejection says nothing about the account or the credentials.
  */
@@ -85,7 +105,7 @@ const message = [
   `To: ${toAddress}`,
   'Subject: Your Vendra sign-up code',
   'Date: Thu, 09 Oct 2026 12:00:00 +0000',
-  'Message-ID: <probe@resend.dev>',
+  'Message-ID: <probe@vendra.local>',
   'Content-Type: text/html; charset=UTF-8',
   '',
   '<p>Your sign-up code is <strong>123456</strong>.</p>',
@@ -210,7 +230,7 @@ function handle(capabilities = '') {
       // Search the whole reply, not just its final line. AUTH is a capability and
       // capabilities come back as a multi-line reply.
       if (/^250[- ]AUTH\s+PLAIN\b/im.test(capabilities)) {
-        send(`AUTH PLAIN ${Buffer.from(`\0resend\0${apiKey}`).toString('base64')}`);
+        send(`AUTH PLAIN ${Buffer.from(`\0${user}\0${apiKey}`).toString('base64')}`);
       } else if (/^250[- ]AUTH\s+LOGIN\b/im.test(capabilities)) {
         stage = 2.5;
         send('AUTH LOGIN');
@@ -230,7 +250,7 @@ function handle(capabilities = '') {
       const plainSocket = socket;
       plainSocket.removeAllListeners();
       socket = tls.connect(
-        { socket: plainSocket, servername: 'smtp.resend.com', rejectUnauthorized: true },
+        { socket: plainSocket, servername: host, rejectUnauthorized: true },
         () => {
           console.log('  [TLS established]');
         },
@@ -256,7 +276,7 @@ function handle(capabilities = '') {
         console.log(`\nAUTH LOGIN refused: ${code} ${message_}`);
         return finish();
       }
-      send(Buffer.from('resend').toString('base64'));
+      send(Buffer.from(user).toString('base64'));
       stage = 2.6;
       return;
     }
@@ -311,7 +331,7 @@ function handle(capabilities = '') {
         console.log('accepted this envelope.');
         console.log('');
         console.log('What it does NOT establish: that the message can be sent.');
-        console.log('Resend answers RCPT TO with 250 and defers the real recipient');
+        console.log('Many providers answer RCPT TO with 250 and defer the real recipient');
         console.log('check to DATA. A test sender passes this stage and is still');
         console.log('refused at the next one.');
         console.log('');
@@ -341,7 +361,7 @@ function handle(capabilities = '') {
       if (code === 250) {
         console.log(`MESSAGE ACCEPTED: ${code} ${message_}`);
         console.log('The provider accepted the envelope and the body.');
-        console.log('So a Resend-side content rejection is ruled out.');
+        console.log('So a provider-side content rejection is ruled out.');
       } else {
         console.log(`MESSAGE REJECTED: ${code} ${message_}`);
         console.log('The provider refused the message itself. This is the stage');
@@ -360,7 +380,7 @@ function handle(capabilities = '') {
 function authFailed() {
   console.log(`\nauthentication failed: ${code} ${message_}`);
   console.log('The API key was rejected. Check it exists, is not revoked, and');
-  console.log('belongs to this Resend account.');
+  console.log('belongs to this account.');
   finish();
 }
 
@@ -393,14 +413,14 @@ function attach(sock) {
 
 if (implicitTls) {
   socket = tls.connect({
-    host: 'smtp.resend.com',
+    host,
     port: 465,
-    servername: 'smtp.resend.com',
+    servername: host,
     rejectUnauthorized: true,
   });
   attach(socket);
 } else {
-  socket = net.connect({ host: 'smtp.resend.com', port: 587 });
+  socket = net.connect({ host, port: 587 });
   attach(socket);
 }
 
