@@ -13,12 +13,22 @@ import {
 import type { AuthFormState } from '@/lib/auth-errors';
 import { Button, Field, TextInput, ErrorMessage, SuccessMessage, InfoMessage } from '@/components/app/ui';
 import { OtpInput, codeDigits } from '@/components/auth/OtpInput';
-import { isEmailShaped } from '@/lib/auth-redirect';
+import { ConfirmedMessage } from '@/components/auth/ConfirmedMessage';
+import { isEmailShaped, safeDestination } from '@/lib/auth-redirect';
 
 const INITIAL: AuthFormState = { error: null, message: null, stage: 'details' };
 
 /** Seconds the resend button stays disabled after a code is sent. */
 const RESEND_COOLDOWN = 60;
+
+/**
+ * How long the confirmation stays on screen before the router moves on.
+ *
+ * Shorter than the interstitial's pause, because the retailer is already looking
+ * at this panel and has watched it change; the acknowledgement is a beat, not a
+ * screen they need to read.
+ */
+const CONFIRMED_HOLD_MS = 900;
 
 /**
  * Resend control with its own cooldown.
@@ -114,16 +124,29 @@ export function SignInForm() {
   const codeDigitsOnly = codeDigits(code);
 
   /**
-   * A session now exists. Refresh so server components re-render as a signed-in
-   * user, and land the retailer where they were headed.
+   * A session now exists. Acknowledge it, then go.
+   *
+   * Routing immediately meant the panel the retailer had just filled in was
+   * replaced by the app in the same frame the server action returned, so a
+   * correct code produced no visible success at all — indistinguishable from the
+   * form simply clearing. `verified` holds the confirmation on screen long enough
+   * to read, and only then refreshes and navigates.
    */
+  const sessionReady =
+    signInState.stage === 'verified' || verifyState.stage === 'verified' || signUpState.stage === 'verified';
+
   useEffect(() => {
-    if (signInState.stage === 'verified' || verifyState.stage === 'verified' || signUpState.stage === 'verified') {
+    if (!sessionReady) return;
+
+    const timer = setTimeout(() => {
       router.refresh();
-      const safe = returnTo && returnTo.startsWith('/') && !returnTo.startsWith('//') ? returnTo : '/app';
-      router.push(safe);
-    }
-  }, [signInState.stage, verifyState.stage, signUpState.stage, router, returnTo]);
+      router.push(safeDestination(returnTo));
+    }, CONFIRMED_HOLD_MS);
+
+    return () => clearTimeout(timer);
+  }, [sessionReady, router, returnTo]);
+
+  const verified = sessionReady;
 
   const requestedStage = signUpState.stage === 'code' ? signUpState : signInState.stage === 'code' ? signInState : null;
   const actionCodeEmail = requestedStage?.email ?? null;
@@ -165,7 +188,26 @@ export function SignInForm() {
 
         <div className="overflow-hidden rounded-2xl border border-[var(--border-default)] bg-[var(--surface-panel)] p-6 shadow-[var(--shadow-sm)] md:p-8">
           <AnimatePresence mode="wait" initial={false}>
-            {onCodeStep ? (
+            {verified ? (
+              /* ------------------------------------------------------ CONFIRMED */
+              <motion.div
+                key="confirmed"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.2 }}
+              >
+                {/*
+                  The code path renders the acknowledgement in place rather than
+                  navigating to /auth/confirmed. The retailer is already looking at
+                  this panel, having just pressed its button, and swapping the page
+                  out from under them hides the thing they just did. A full-screen
+                  takeover is for arriving from an email client; here the panel they
+                  were working in becomes the confirmation.
+                */}
+                <ConfirmedMessage compact detail="Taking you to your shop…" />
+              </motion.div>
+            ) : onCodeStep ? (
               /* ---------------------------------------------------------- CODE */
               <motion.div
                 key="code"

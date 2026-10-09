@@ -64,13 +64,21 @@ export async function GET(request: NextRequest) {
   const { supabaseUrl, supabaseAnonKey } = publicEnv();
 
   /**
+   * The session is established, then acknowledged, then continued.
+   *
+   * Redirecting straight to `next` gave the retailer no evidence that the click
+   * had worked: the browser swapped to the app and said nothing. Going via
+   * /auth/confirmed costs one navigation and makes the outcome legible.
+   *
    * Cookies are written onto the response being returned rather than through
    * `cookies()`. The session must be in the Set-Cookie header of this very
    * redirect; setting it through a separate store and then returning a different
-   * response object is how the session gets dropped and the retailer lands on
-   * /app unauthenticated with no error anywhere.
+   * response object is how the session gets dropped and the retailer lands
+   * unauthenticated with no error anywhere.
    */
-  const response = NextResponse.redirect(`${siteUrl}${next}`);
+  const response = NextResponse.redirect(
+    `${siteUrl}/auth/confirmed?next=${encodeURIComponent(next)}`,
+  );
 
   const supabase = createServerClient(supabaseUrl, supabaseAnonKey, {
     cookies: {
