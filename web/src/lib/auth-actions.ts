@@ -18,6 +18,18 @@ import { publicEnv } from '@/lib/env';
 export interface AuthFormState {
   error: string | null;
   message: string | null;
+  /**
+   * Which step the form should be on.
+   *
+   * `code` means sign-up succeeded and a verification code was sent. The form
+   * moves itself rather than sniffing `message` for a phrase, because that would
+   * make a copy change break the flow.
+   *
+   * `verified` means a session now exists and the router should refresh.
+   */
+  stage?: 'details' | 'code' | 'verified';
+  /** The address the code was sent to, so the form can show it back. */
+  email?: string;
 }
 
 const signInSchema = z.object({
@@ -39,6 +51,126 @@ const signUpSchema = z.object({
     .transform((v) => (v === '' ? undefined : v)),
 });
 
+const verifyCodeSchema = z.object({
+  email: z.string().trim().toLowerCase().email('Enter a valid email address.'),
+  code: z
+    .string()
+    .trim()
+    .regex(/^\d{6}$/, 'Enter the six-digit code from your email.'),
+});
+
+const resendCodeSchema = z.object({
+  email: z.string().trim().toLowerCase().email('Enter a valid email address.'),
+});
+
+/**
+ * Build a Supabase client bound to the request cookies.
+ *
+ * Shared by sign-in, sign-up and code verification so all three read and write
+ * the session in exactly the same way.
+ */
+async function sessionClient() {
+  const cookieStore = await cookies();
+  const { supabaseUrl, supabaseAnonKey } = publicEnv();
+
+  return createServerClient(supabaseUrl, supabaseAnonKey, {
+    cookies: {
+      getAll() {
+        return cookieStore.getAll();
+      },
+      setAll(cookiesToSet) {
+        for (const { name, value, options } of cookiesToSet) {
+          cookieStore.set(name, value, options);
+        }
+      },
+    },
+  });
+}
+
+function siteUrl(): string {
+  return process.env.NEXT_PUBLIC_SITE_URL ?? 'http://localhost:3000';
+}
+
+/**
+ * Turn a Supabase Auth error into something a retailer can act on.
+ *
+ * Matching is done on the stable `code` field, not on the human-readable
+ * message. The message embeds the user's own input, so a substring test on it
+ * will eventually match something the user typed: an earlier version tested for
+ * "otp", and a test account whose address contained those three letters was told
+ * its verification code was wrong when the real problem was that the project
+ * cannot send mail to it. A retailer called "Coptic Provisions" would have been
+ * shown the same nonsense.
+ *
+ * `email_address_invalid` and `over_email_send_rate_limit` are called out
+ * separately because neither is the user's fault and no amount of retrying helps.
+ * Supabase's built-in email sender allows two messages an hour for the whole
+ * project and, since September 2024, only delivers to members of the Supabase
+ * organisation. Saying "try again" would be a lie.
+ */
+function describeAuthError(
+  error: { code?: string; message: string },
+  context: 'signin' | 'signup' | 'verify' | 'resend',
+): AuthFormState {
+  const code = error.code ?? '';
+
+  if (code === 'over_email_send_rate_limit' || /email rate limit/i.test(error.message)) {
+    return {
+      error:
+        context === 'verify'
+          ? 'Too many attempts. Wait a minute, then enter the code again.'
+          : 'Vendra cannot send verification email right now. Supabase’s built-in email sender is limited to two messages an hour for the whole project and delivers only to the operator’s own address. An email service needs to be connected before new retailers can sign up.',
+      message: null,
+    };
+  }
+
+  if (code === 'email_address_invalid' || /is invalid/i.test(error.message)) {
+    return {
+      error:
+        'Vendra cannot send verification email to that address right now. Supabase’s built-in email sender only delivers to the operator’s own email address, so an email service has to be connected before new retailers can sign up.',
+      message: null,
+    };
+  }
+
+  // OTP failures only make sense on the code step.
+  if (
+    context !== 'signin' &&
+    (code === 'otp_expired' ||
+      code === 'access_denied' ||
+      /token has expired|invalid token/i.test(error.message))
+  ) {
+    return {
+      error: 'That code is not right, or it has expired. Check the newest email and enter that code.',
+      message: null,
+    };
+  }
+
+  if (code === 'user_already_exists' || /already registered|already been registered/i.test(error.message)) {
+    return {
+      error: 'An account already uses that email address. Sign in instead.',
+      message: null,
+    };
+  }
+
+  if (code === 'invalid_credentials' || /invalid login credentials/i.test(error.message)) {
+    return {
+      error: 'That email and password did not match. Check them and try again.',
+      message: null,
+    };
+  }
+
+  if (code === 'email_not_confirmed') {
+    return {
+      error:
+        'That account still needs its email confirmed. Enter the six-digit code we sent, or send it again.',
+      message: null,
+      stage: 'code',
+    };
+  }
+
+  return { error: 'We could not do that just now. Try again.', message: null };
+}
+
 export async function signInAction(
   _prev: AuthFormState,
   formData: FormData,
@@ -55,21 +187,7 @@ export async function signInAction(
     };
   }
 
-  const cookieStore = await cookies();
-  const { supabaseUrl, supabaseAnonKey } = publicEnv();
-
-  const supabase = createServerClient(supabaseUrl, supabaseAnonKey, {
-    cookies: {
-      getAll() {
-        return cookieStore.getAll();
-      },
-      setAll(cookiesToSet) {
-        for (const { name, value, options } of cookiesToSet) {
-          cookieStore.set(name, value, options);
-        }
-      },
-    },
-  });
+  const supabase = await sessionClient();
 
   const { error } = await supabase.auth.signInWithPassword({
     email: parsed.data.email,
@@ -77,25 +195,103 @@ export async function signInAction(
   });
 
   if (error) {
-    // Reported in plain language without revealing whether an address exists.
-    const invalid = /invalid login credentials/i.test(error.message);
-    const unconfirmed = /email not confirmed/i.test(error.message);
-    const rateLimited = /rate limit|too many/i.test(error.message);
+    if (/email not confirmed/i.test(error.message)) {
+      return {
+        error:
+          'That account still needs its email confirmed. Enter the six-digit code we sent, or send it again.',
+        message: null,
+        stage: 'code',
+        email: parsed.data.email,
+      };
+    }
 
+    return describeAuthError(error, 'signin');
+  }
+
+  revalidatePath('/', 'layout');
+  return { error: null, message: null, stage: 'verified' };
+}
+
+/**
+ * POST the verification code for a sign-up.
+ *
+ * The user is returned to the code step either way, including when the address is
+ * already registered. Telling an anonymous visitor that a particular address has
+ * an account would turn the sign-up form into an account-enumeration oracle.
+ */
+export async function resendCodeAction(
+  _prev: AuthFormState,
+  formData: FormData,
+): Promise<AuthFormState> {
+  const parsed = resendCodeSchema.safeParse({ email: formData.get('email') });
+
+  if (!parsed.success) {
     return {
-      error: invalid
-        ? 'That email and password did not match. Check them and try again.'
-        : unconfirmed
-          ? 'Confirm your email address first. Check your inbox for the link we sent.'
-          : rateLimited
-            ? 'Too many attempts. Wait a minute and try again.'
-            : 'We could not sign you in just now. Try again.',
+      error: parsed.error.issues[0]?.message ?? 'Check the email address and try again.',
+      message: null,
+    };
+  }
+
+  const supabase = await sessionClient();
+
+  const { error } = await supabase.auth.resend({
+    type: 'signup',
+    email: parsed.data.email,
+    options: { emailRedirectTo: `${siteUrl()}/auth/confirm` },
+  });
+
+  if (error && /already registered|already been registered/i.test(error.message)) {
+    // Deliberately indistinguishable from success. See the note above.
+    return { error: null, message: 'If that address needs a code, one is on its way.' };
+  }
+
+  if (error) return describeAuthError(error, 'resend');
+
+  return { error: null, message: 'If that address needs a code, one is on its way.' };
+}
+
+/**
+ * Exchange the six-digit code for a session.
+ *
+ * This is the whole point of the code flow: verification happens inside the app,
+ * so a retailer is not sent out to an email client and back, and the code cannot
+ * be forwarded to a different browser and silently accepted there.
+ */
+export async function verifyCodeAction(
+  _prev: AuthFormState,
+  formData: FormData,
+): Promise<AuthFormState> {
+  const parsed = verifyCodeSchema.safeParse({
+    email: formData.get('email'),
+    code: formData.get('code'),
+  });
+
+  if (!parsed.success) {
+    return {
+      error: parsed.error.issues[0]?.message ?? 'Enter the six-digit code.',
+      message: null,
+    };
+  }
+
+  const supabase = await sessionClient();
+
+  const { data, error } = await supabase.auth.verifyOtp({
+    email: parsed.data.email,
+    token: parsed.data.code,
+    type: 'signup',
+  });
+
+  if (error) return describeAuthError(error, 'verify');
+
+  if (!data.session) {
+    return {
+      error: 'That code was accepted but did not start a session. Sign in with your password.',
       message: null,
     };
   }
 
   revalidatePath('/', 'layout');
-  return { error: null, message: null };
+  return { error: null, message: null, stage: 'verified' };
 }
 
 export async function signUpAction(
@@ -115,29 +311,17 @@ export async function signUpAction(
     };
   }
 
-  const cookieStore = await cookies();
-  const { supabaseUrl, supabaseAnonKey } = publicEnv();
+  const supabase = await sessionClient();
+  const origin = siteUrl();
 
-  const supabase = createServerClient(supabaseUrl, supabaseAnonKey, {
-    cookies: {
-      getAll() {
-        return cookieStore.getAll();
-      },
-      setAll(cookiesToSet) {
-        for (const { name, value, options } of cookiesToSet) {
-          cookieStore.set(name, value, options);
-        }
-      },
-    },
-  });
-
-  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? 'http://localhost:3000';
-
-  const { error } = await supabase.auth.signUp({
+  const { data, error } = await supabase.auth.signUp({
     email: parsed.data.email,
     password: parsed.data.password,
     options: {
-      emailRedirectTo: `${siteUrl}/auth/confirm`,
+      // The magic-link route is kept working. Some deployments turn email
+      // confirmation off, and anyone who follows an old link should still land
+      // somewhere sensible rather than on a dead page.
+      emailRedirectTo: `${origin}/auth/confirm`,
       data: { display_name: parsed.data.displayName ?? null },
     },
   });
@@ -147,13 +331,23 @@ export async function signUpAction(
     return {
       error: exists
         ? 'An account already uses that email address. Sign in instead.'
-        : 'We could not create that account just now. Try again.',
+        : describeAuthError(error, 'signup').error,
       message: null,
     };
   }
 
+  // When the project has email confirmation switched off, signUp hands back a
+  // usable session and no code is ever sent. Detecting that here is what stops
+  // the UI showing a code box for an email that will never arrive.
+  if (data.session) {
+    revalidatePath('/', 'layout');
+    return { error: null, message: null, stage: 'verified' };
+  }
+
   return {
     error: null,
-    message: 'Account created. Check your email for a confirmation link, then sign in.',
+    message: `Enter the six-digit code we sent to ${parsed.data.email}.`,
+    stage: 'code',
+    email: parsed.data.email,
   };
 }

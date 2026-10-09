@@ -1,29 +1,135 @@
 'use client';
 
 import Link from 'next/link';
-import { useActionState, useState } from 'react';
-import { useSearchParams } from 'next/navigation';
-import { signInAction, signUpAction, type AuthFormState } from '@/lib/auth-actions';
-import { Button, Field, TextInput, ErrorMessage, SuccessMessage } from '@/components/app/ui';
+import { useActionState, useEffect, useRef, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { AnimatePresence, motion } from 'motion/react';
+import {
+  signInAction,
+  signUpAction,
+  verifyCodeAction,
+  resendCodeAction,
+  type AuthFormState,
+} from '@/lib/auth-actions';
+import { Button, Field, TextInput, ErrorMessage, SuccessMessage, InfoMessage } from '@/components/app/ui';
+import { OtpInput, codeDigits } from '@/components/auth/OtpInput';
 
-const INITIAL: AuthFormState = { error: null, message: null };
+const INITIAL: AuthFormState = { error: null, message: null, stage: 'details' };
+
+/** Seconds the resend button stays disabled after a code is sent. */
+const RESEND_COOLDOWN = 60;
+
+/**
+ * Resend control with its own cooldown.
+ *
+ * It owns the countdown so the timer starts on mount, which is a legitimate use
+ * of an effect: subscribing to time passing. Doing this in the parent instead
+ * meant setState inside an effect every time the server action returned, which
+ * cascades renders and is the pattern React's own lint rule warns about.
+ *
+ * It is keyed by the caller on the code address and the last resend result, so a
+ * successful resend remounts it and the timer starts over as a matter of course.
+ */
+function ResendCodeButton({
+  action,
+  email,
+}: {
+  action: (formData: FormData) => void;
+  email: string;
+}) {
+  const [pending, setPending] = useState(false);
+  const [secondsLeft, setSecondsLeft] = useState(RESEND_COOLDOWN);
+
+  useEffect(() => {
+    if (secondsLeft <= 0) return;
+    const timer = setTimeout(() => setSecondsLeft((n) => n - 1), 1000);
+    return () => clearTimeout(timer);
+  }, [secondsLeft]);
+
+  return (
+    <form
+      action={action}
+      onSubmit={() => {
+        setPending(true);
+      }}
+    >
+      <input type="hidden" name="email" value={email} />
+      <button
+        type="submit"
+        disabled={secondsLeft > 0 || pending}
+        className="text-sm font-semibold text-[var(--accent)] underline underline-offset-2 transition-colors hover:text-[var(--accent-hover)] disabled:cursor-not-allowed disabled:text-[var(--text-muted)] disabled:no-underline"
+      >
+        {secondsLeft > 0
+          ? `Send a new code in ${secondsLeft}s`
+          : pending
+            ? 'Sending…'
+            : 'Send a new code'}
+      </button>
+    </form>
+  );
+}
 
 /**
  * /sign-in (FRONTEND_SPEC 4.4)
  *
- * ONE auth method is rendered — password and email confirmation. No provider
- * chooser, because the pilot uses a single configured method.
+ * ONE auth method: email and password. No provider chooser, because the pilot
+ * uses a single configured method.
+ *
+ * Sign-up is a two-step flow inside this page rather than a link in an email.
+ * After the account is created the retailer types a six-digit code here, so they
+ * never leave the app and the code cannot be forwarded to another browser and
+ * silently accepted there. The emailed magic link still works, for anyone who
+ * follows one.
+ *
+ * Two things this deliberately does not do:
+ *
+ *   - it does not store the address in localStorage. The address is derived from
+ *     the server action's own return value, so it cannot be tampered with from
+ *     the console, and it does not outlive the tab that received it.
+ *
+ *   - it does not tell an anonymous visitor that a particular address already has
+ *     an account. That would turn this form into an account-enumeration oracle.
  */
 export function SignInForm() {
+  const router = useRouter();
   const searchParams = useSearchParams();
+  const returnTo = searchParams.get('returnTo');
+
   const [mode, setMode] = useState<'sign-in' | 'sign-up'>('sign-in');
   const [signInState, signInFormAction, signInPending] = useActionState(signInAction, INITIAL);
   const [signUpState, signUpFormAction, signUpPending] = useActionState(signUpAction, INITIAL);
+  const [verifyState, verifyFormAction, verifyPending] = useActionState(verifyCodeAction, INITIAL);
+  const [resendState, resendFormAction] = useActionState(resendCodeAction, INITIAL);
 
   const bannerError = searchParams.get('error');
-  const returnTo = searchParams.get('returnTo');
-  const pending = mode === 'sign-in' ? signInPending : signUpPending;
-  const state = mode === 'sign-in' ? signInState : signUpState;
+
+  const [code, setCode] = useState('');
+  // The only thing "Start again" needs to do is stop deriving the code step. The
+  // address and the step itself come from the server action, not from local state.
+  const [codeStepDismissed, setCodeStepDismissed] = useState(false);
+  const submitRef = useRef<HTMLFormElement>(null);
+
+  /** Digits only. `code` stays fixed width so clearing a middle box does not shift the rest. */
+  const codeDigitsOnly = codeDigits(code);
+
+  /**
+   * A session now exists. Refresh so server components re-render as a signed-in
+   * user, and land the retailer where they were headed.
+   */
+  useEffect(() => {
+    if (signInState.stage === 'verified' || verifyState.stage === 'verified' || signUpState.stage === 'verified') {
+      router.refresh();
+      const safe = returnTo && returnTo.startsWith('/') && !returnTo.startsWith('//') ? returnTo : '/app';
+      router.push(safe);
+    }
+  }, [signInState.stage, verifyState.stage, signUpState.stage, router, returnTo]);
+
+  const requestedStage = signUpState.stage === 'code' ? signUpState : signInState.stage === 'code' ? signInState : null;
+  const codeEmail = requestedStage?.email ?? null;
+  const onCodeStep = codeEmail !== null && !codeStepDismissed;
+
+  const busy = signInPending || signUpPending || verifyPending;
+  const codeError = verifyState.error;
 
   return (
     <main className="min-h-dvh grid place-items-center bg-[var(--bg-primary)] px-4 py-10">
@@ -35,122 +141,227 @@ export function SignInForm() {
           Vendra
         </Link>
 
-        <div className="rounded-2xl border border-[var(--border-default)] bg-[var(--surface-panel)] p-6 shadow-[var(--shadow-sm)] md:p-8">
-          <h1 className="font-display text-2xl font-semibold tracking-[-0.03em] text-[var(--text-primary)]">
-            {mode === 'sign-in' ? 'Sign in to Vendra' : 'Create a Vendra account'}
-          </h1>
-          <p className="mt-2 font-body text-sm leading-relaxed text-[var(--text-secondary)]">
-            {mode === 'sign-in'
-              ? 'Keep your shop’s supplier deals together, from quote to resolution.'
-              : 'Set up your shop and start recording supplier deals from quote to resolution.'}
-          </p>
-
-          {bannerError && (
-            <div className="mt-5">
-              <ErrorMessage>{bannerError}</ErrorMessage>
-            </div>
-          )}
-
-          {mode === 'sign-in' ? (
-            <form action={signInFormAction} className="mt-6 flex flex-col gap-4">
-              {returnTo && <input type="hidden" name="returnTo" value={returnTo} />}
-
-              <Field label="Email address" htmlFor="email" required>
-                <TextInput
-                  id="email"
-                  name="email"
-                  type="email"
-                  autoComplete="email"
-                  required
-                  placeholder="you@yourshop.com"
-                />
-              </Field>
-
-              <Field label="Password" htmlFor="password" required>
-                <TextInput
-                  id="password"
-                  name="password"
-                  type="password"
-                  autoComplete="current-password"
-                  required
-                />
-              </Field>
-
-              {state.error && <ErrorMessage>{state.error}</ErrorMessage>}
-
-              <Button type="submit" disabled={pending} className="w-full">
-                {pending ? 'Signing in…' : 'Sign in'}
-              </Button>
-            </form>
-          ) : (
-            <form action={signUpFormAction} className="mt-6 flex flex-col gap-4">
-              {returnTo && <input type="hidden" name="returnTo" value={returnTo} />}
-
-              <Field label="Your name" htmlFor="displayName" help="Optional. Used to label your activity.">
-                <TextInput id="displayName" name="displayName" autoComplete="name" />
-              </Field>
-
-              <Field label="Email address" htmlFor="email" required>
-                <TextInput
-                  id="email"
-                  name="email"
-                  type="email"
-                  autoComplete="email"
-                  required
-                  placeholder="you@yourshop.com"
-                />
-              </Field>
-
-              <Field
-                label="Password"
-                htmlFor="password"
-                required
-                help="At least 10 characters."
+        <div className="overflow-hidden rounded-2xl border border-[var(--border-default)] bg-[var(--surface-panel)] p-6 shadow-[var(--shadow-sm)] md:p-8">
+          <AnimatePresence mode="wait" initial={false}>
+            {onCodeStep ? (
+              /* ---------------------------------------------------------- CODE */
+              <motion.div
+                key="code"
+                initial={{ opacity: 0, x: 18 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: -18 }}
+                transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
               >
-                <TextInput
-                  id="password"
-                  name="password"
-                  type="password"
-                  autoComplete="new-password"
-                  minLength={10}
-                  required
-                />
-              </Field>
+                <div className="flex flex-col items-center text-center">
+                  <span
+                    aria-hidden="true"
+                    className="mb-5 grid size-12 place-items-center rounded-2xl border border-[var(--accent-border)] bg-[var(--accent-soft)] text-[var(--accent)]"
+                  >
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                      <rect x="3" y="5" width="18" height="14" rx="2.5" />
+                      <path d="m3.5 7 8.5 6 8.5-6" />
+                    </svg>
+                  </span>
 
-              {state.error && <ErrorMessage>{state.error}</ErrorMessage>}
-              {state.message && <SuccessMessage>{state.message}</SuccessMessage>}
+                  <h1 className="font-display text-2xl font-semibold tracking-[-0.03em] text-[var(--text-primary)]">
+                    Check your email
+                  </h1>
+                  <p className="mt-2 text-sm leading-relaxed text-[var(--text-secondary)]">
+                    We sent a six-digit code to{' '}
+                    <span className="font-medium text-[var(--text-primary)]">{codeEmail}</span>.
+                    Enter it here to finish creating your account.
+                  </p>
+                </div>
 
-              <Button type="submit" disabled={pending} className="w-full">
-                {pending ? 'Creating your account…' : 'Create an account'}
-              </Button>
-            </form>
-          )}
+                <form action={verifyFormAction} className="mt-6 flex flex-col gap-5" ref={submitRef}>
+                  <input type="hidden" name="email" value={codeEmail ?? ''} />
+                  {/* The hidden field is what the server actually reads, and it
+                      carries digits only. */}
+                  <input type="hidden" name="code" value={codeDigitsOnly} />
 
-          <p className="mt-6 font-body text-sm text-[var(--text-secondary)]">
-            {mode === 'sign-in' ? (
-              <>
-                New to Vendra?{' '}
-                <button
-                  type="button"
-                  onClick={() => setMode('sign-up')}
-                  className="font-semibold text-[var(--accent)] underline underline-offset-2 hover:text-[var(--accent-hover)]"
-                >
-                  Create an account
-                </button>
-              </>
+                  <OtpInput
+                    value={code}
+                    onChange={setCode}
+                    onComplete={() => {
+                      // Submitting from here means the retailer never has to find
+                      // the button. The form posts the same action either way.
+                      requestAnimationFrame(() => submitRef.current?.requestSubmit());
+                    }}
+                    disabled={verifyPending}
+                    invalid={Boolean(codeError)}
+                    errorText={verifyState.error}
+                  />
+
+                  <Button type="submit" disabled={verifyPending || codeDigitsOnly.length !== 6} className="w-full">
+                    {verifyPending ? 'Checking your code…' : 'Verify and continue'}
+                  </Button>
+                </form>
+
+                <div className="mt-5 flex flex-col items-center gap-3">
+                  <ResendCodeButton
+                    key={`${codeEmail}:${resendState.message ?? ''}:${resendState.error ?? ''}`}
+                    action={resendFormAction}
+                    email={codeEmail ?? ''}
+                  />
+
+                  {resendState.message && <p className="text-sm text-[var(--text-secondary)]">{resendState.message}</p>}
+                  {resendState.error && <ErrorMessage>{resendState.error}</ErrorMessage>}
+                </div>
+
+                <div className="mt-6">
+                  <InfoMessage>
+                    The code stops working after 30 minutes. If it does not arrive, check your spam folder
+                    before asking for another one.
+                  </InfoMessage>
+                </div>
+
+                <p className="mt-5 text-center text-sm text-[var(--text-secondary)]">
+                  Wrong address?{' '}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCodeStepDismissed(true);
+                      setCode('');
+                    }}
+                    className="font-semibold text-[var(--accent)] underline underline-offset-2 hover:text-[var(--accent-hover)]"
+                  >
+                    Start again
+                  </button>
+                </p>
+              </motion.div>
             ) : (
-              <>
-                Already have an account?{' '}
-                <button
-                  type="button"
-                  onClick={() => setMode('sign-in')}
-                  className="font-semibold text-[var(--accent)] underline underline-offset-2 hover:text-[var(--accent-hover)]"
-                >
-                  Back to sign in
-                </button>
-              </>
+              /* ------------------------------------------------------- DETAILS */
+              <motion.div
+                key="details"
+                initial={{ opacity: 0, x: -18 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: 18 }}
+                transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
+              >
+                <h1 className="font-display text-2xl font-semibold tracking-[-0.03em] text-[var(--text-primary)]">
+                  {mode === 'sign-in' ? 'Sign in to Vendra' : 'Create a Vendra account'}
+                </h1>
+                <p className="mt-2 font-body text-sm leading-relaxed text-[var(--text-secondary)]">
+                  {mode === 'sign-in'
+                    ? 'Keep your shop’s supplier deals together, from quote to resolution.'
+                    : 'Set up your shop and start recording supplier deals from quote to resolution.'}
+                </p>
+
+                {bannerError && (
+                  <div className="mt-5">
+                    <ErrorMessage>{bannerError}</ErrorMessage>
+                  </div>
+                )}
+
+                {mode === 'sign-in' ? (
+                  <form action={signInFormAction} className="mt-6 flex flex-col gap-4">
+                    {returnTo && <input type="hidden" name="returnTo" value={returnTo} />}
+
+                    <Field label="Email address" htmlFor="email" required>
+                      <TextInput
+                        id="email"
+                        name="email"
+                        type="email"
+                        autoComplete="email"
+                        required
+                        placeholder="you@yourshop.com"
+                      />
+                    </Field>
+
+                    <Field label="Password" htmlFor="password" required>
+                      <TextInput
+                        id="password"
+                        name="password"
+                        type="password"
+                        autoComplete="current-password"
+                        required
+                      />
+                    </Field>
+
+                    {signInState.error && <ErrorMessage>{signInState.error}</ErrorMessage>}
+
+                    <Button type="submit" disabled={signInPending} className="w-full">
+                      {signInPending ? 'Signing in…' : 'Sign in'}
+                    </Button>
+                  </form>
+                ) : (
+                  <form action={signUpFormAction} className="mt-6 flex flex-col gap-4">
+                    {returnTo && <input type="hidden" name="returnTo" value={returnTo} />}
+
+                    <Field label="Your name" htmlFor="displayName" help="Optional. Used to label your activity.">
+                      <TextInput id="displayName" name="displayName" autoComplete="name" />
+                    </Field>
+
+                    <Field label="Email address" htmlFor="email" required>
+                      <TextInput
+                        id="email"
+                        name="email"
+                        type="email"
+                        autoComplete="email"
+                        required
+                        placeholder="you@yourshop.com"
+                      />
+                    </Field>
+
+                    <Field
+                      label="Password"
+                      htmlFor="password"
+                      required
+                      help="At least 10 characters."
+                    >
+                      <TextInput
+                        id="password"
+                        name="password"
+                        type="password"
+                        autoComplete="new-password"
+                        minLength={10}
+                        required
+                      />
+                    </Field>
+
+                    {signUpState.error && <ErrorMessage>{signUpState.error}</ErrorMessage>}
+                    {signUpState.message && !signUpState.error && (
+                      <SuccessMessage>{signUpState.message}</SuccessMessage>
+                    )}
+
+                    <Button type="submit" disabled={signUpPending} className="w-full">
+                      {signUpPending ? 'Creating your account…' : 'Create an account'}
+                    </Button>
+                  </form>
+                )}
+
+                <p className="mt-6 font-body text-sm text-[var(--text-secondary)]">
+                  {mode === 'sign-in' ? (
+                    <>
+                      New to Vendra?{' '}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setMode('sign-up');
+                          setCodeStepDismissed(false);
+                          setCode('');
+                        }}
+                        className="font-semibold text-[var(--accent)] underline underline-offset-2 hover:text-[var(--accent-hover)]"
+                      >
+                        Create an account
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      Already have an account?{' '}
+                      <button
+                        type="button"
+                        onClick={() => setMode('sign-in')}
+                        className="font-semibold text-[var(--accent)] underline underline-offset-2 hover:text-[var(--accent-hover)]"
+                      >
+                        Back to sign in
+                      </button>
+                    </>
+                  )}
+                </p>
+              </motion.div>
             )}
-          </p>
+          </AnimatePresence>
         </div>
 
         <p className="mt-6 font-body text-xs leading-relaxed text-[var(--text-muted)]">
@@ -161,6 +372,8 @@ export function SignInForm() {
           </Link>
           .
         </p>
+
+        {busy && <span className="sr-only" role="status">Working…</span>}
       </div>
     </main>
   );
