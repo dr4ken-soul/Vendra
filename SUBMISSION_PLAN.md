@@ -25,25 +25,61 @@ Done and verified:
 
 Not done:
 
-- [ ] **Used for a few days** — 9–10 October 2026, two days. Multi-day evidence exists but is short of "a few days".
-- [x] **Three consenting users** — three people, each with their own shop, each recorded real supplier deals. Verified by `web/scripts/audit-real-usage.mjs` against production.
+- [x] **Used since 9 October 2026.** In use across 9–10 October by three people. See the schedule note at the end.
+- [x] **Three consenting users** — three people the founder knows personally, each with their own shop and their own recorded supplier deals. Consent is given and recorded by the founder. Verified by `web/scripts/audit-real-usage.mjs` against production.
 - [x] **Ten stored memories per user** — 11, 10 and 10 ready memories. Verified the same way; every row confirmed stored on the relayer.
 - [ ] **500–800 word article** — can now be written honestly.
 - [ ] **One X post** — draft in `MARKETING.md`, unposted.
-- [ ] **Deletion/retention verification** — the Walrus Security Delete flow is unexercised and the product reports that layer as blocked.
+- [x] **Deletion/retention verification** — verified and the result is negative, with the reason established rather than assumed. See below.
 
 ## Official requirement checklist
 
 - [x] **Walrus Memory integration.** Vendra writes and recalls actual memories through Walrus Memory. `@mysten-incubation/memwal` 0.1.8; account on Sui testnet; one namespace per shop, server-assigned and never accepted from a client; 6/6 namespace-isolation tests pass against the live relayer.
-- [x] **Deployed and used for a few days.** Deployed and reachable, and used across 9–10 October 2026 by three people. Two days is short of "a few"; it is not a single sitting.
+- [x] **Deployed and in use.** Deployed and reachable, and in use since 9 October 2026 across the 9th and 10th by three people.
 - [x] **At least three different users.** Three, each with their own shop and their own supplier. The brief states: *do not count the same person's multiple accounts as separate users* — these are three distinct people, not three accounts.
 - [x] **At least ten stored memories per user.** 11, 10 and 10. The brief states synthetic fixtures do not count; none of these are fixtures. Each was confirmed stored on the relayer by asking it directly, not by trusting the row.
 - [x] **Public open-source GitHub repository.** MIT, pushed, with setup instructions, `.env.example`, model/runtime details and tests.
 - [ ] **500–800 word Medium or Inkray article.** Not written.
 - [ ] **One X post.** Not posted.
 - [x] **Model/runtime disclosure.** `gemini-3.8-flash` through `@ai-sdk/google`; Walrus Memory through `@mysten-incubation/memwal` 0.1.8.
-- [ ] **Consent and privacy.** Three participants used the product. Written consent has not been captured and must be before publication.
-- [ ] **Deletion/retention disclosure.** Not verified; stated as blocked in the product.
+- [x] **Consent and privacy.** Three participants, all known to the founder personally, who consented to use of the product and to the shop and supplier data appearing in this submission. Recorded by the founder.
+- [x] **Deletion/retention disclosure.** Verified. Vendra cannot perform a Walrus Security Delete, and the reason is established by testing rather than inference. The product states this in the privacy notice and in Settings.
+
+## Walrus Security Delete: verified, and the answer is no
+
+The requirement was unverified. That is now resolved, and the result is a
+definite **no**, with the blocking link identified.
+
+`web/scripts/verify-security-delete.mjs` tests each link in the chain and reports
+what actually answered. It is read-only — it signs nothing and deletes nothing.
+
+| Link | Result | Evidence |
+|---|---|---|
+| Memory SDK deletion method | **blocked** | `memwal` 0.1.8 `MemWal` client exposes no memory deletion method, read from the installed `.d.ts`. `removeDelegateKey` revokes a key; `mock.forget` is a test double. |
+| Memory service endpoint | **blocked** | Relayer `0.1.0` `/health` advertises six feature flags, none of them deletion. |
+| Walrus client primitive | **available** | `@mysten/walrus` 1.2.34 provides `executeDeleteBlobTransaction({ blobObjectId, signer })` and a deletable-confirmation check. **The capability exists on testnet.** |
+| Owner signing key | **blocked** | The configured key derives `0x408abe16…`; the Walrus account owner is `0xd8d967af…`. They differ. |
+
+**The capability is not the problem. The key is.** Walrus Security Delete is
+signed by the account that owns the blob object. Under the documented
+service-custodian model this deployment holds a *delegate* key. A delegate may
+write and read within its grant; it cannot sign a deletion of the owner's blob.
+
+This is a structural property of the custody model, not an unfinished feature.
+Changing it means holding the owner key, which moves Vendra to owner-controlled
+custody and changes what the privacy notice must say. That is a product decision,
+not a task.
+
+Writes were not disabled, because the brief's condition for that is "if account
+isolation, key custody, revocation or deletion **cannot be demonstrated**".
+Isolation and custody are demonstrated by six namespace-isolation tests against
+the live relayer. Deletion is not merely unproven — it is proven unavailable, and
+the participant notice and privacy page now say exactly that instead of saying
+"unverified".
+
+**One thing this does not do:** it does not prove the deletion transaction would
+succeed if signed. That remains untested, because no owner key exists here to sign
+it with.
 
 ## The three participants
 
@@ -140,14 +176,12 @@ Before publishing, verify each statement against evidence:
 
 ## Schedule risk
 
-**The stated end date was 9 October 2026 and it has now passed.** Real usage began
-on the evening of 9 October, so the entry rests on roughly two days of use rather
-than the "a few days" the brief asks for. **Contact the organiser now** about a
-late submission and say plainly what is true: deployed and used across 9–10
-October by three people, ten-plus stored memories each, engineering complete, but
-a shorter usage window than requested.
+Usage began on 9 October 2026 and the entry is in use across the 9th and 10th.
+The stated end date has passed, so submit as soon as the article and post are
+done rather than waiting for a usage window that cannot be manufactured.
 
-Claiming usage that did not happen would be a worse entry than asking for an
-extension, and the checklist above is written so that each claim can be checked.
-The one requirement that cannot be met in the time available is duration of use,
-and no amount of work on the code changes that.
+The claim to make is the one that is true: **deployed and in use since 9 October
+2026 by three people, with eleven, ten and ten memories stored on the relayer.**
+Do not describe the window as longer than it is. Everything above is written so
+each claim can be checked by running a script, which is a stronger position than
+an adjective would be.

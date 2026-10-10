@@ -27,6 +27,7 @@
     "@mysten-incubation/memwal": "^0.1.8",
     "@mysten/seal": "^1.4.19",
     "@mysten/sui": "^2.35.0",
+    "@mysten/walrus": "^1.2.34",
     "@supabase/ssr": "^0.12.7",
     "@supabase/supabase-js": "^2.117.3",
     "ai": "^7.0.131",

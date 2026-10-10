@@ -365,7 +365,7 @@ export function SettingsView({
             />
             <LimitRow
               label="Memories"
-              value="Not yet confirmable as permanently erased. The memory service exposes no deletion method and the signed deletion flow has not been verified in this deployment. A deletion request switches memory off and records that layer as blocked."
+              value="Not erasable by us. Walrus Security Delete is signed by the account that owns the blob, and Vendra holds a delegate key rather than the owner key, so we cannot sign it. This was checked, not assumed. A deletion request switches memory off and records that layer as blocked."
               tone="warning"
             />
           </ul>

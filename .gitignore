@@ -110,3 +110,4 @@ demo/analysis/voiceover/audio/*.wav
 demo/public/screens/*.png
 demo/music/sourced/*.mp3
 demo/music/sourced/*.wav
+web/scripts/security-delete-verification.json

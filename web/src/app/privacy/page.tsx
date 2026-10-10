@@ -71,7 +71,7 @@ export default function PrivacyPage() {
       body: [
         'Deal records, suppliers, chat messages and audit entries can be deleted from our database.',
         'Attached files can be removed from private storage. A copy in a backup may persist until the backup cycle completes.',
-        'Memories written to Walrus Memory cannot yet be confirmed as permanently erased. The Walrus Memory SDK does not offer a deletion method, and the wallet-authenticated deletion flow has not been verified in this deployment. When you request deletion, your shop’s memory is switched off and the layer is reported as blocked rather than erased.',
+        'Memories written to Walrus Memory cannot be permanently erased by us, and we can say exactly why. Walrus Security Delete is an on-chain operation signed by the account that owns the blob. Vendra holds a delegate key, not the owner key, so we cannot sign that deletion. We checked this rather than assuming it: the memory SDK offers no deletion method, the memory service exposes no deletion endpoint, and our key is not the account owner. When you request deletion, your shop’s memory is switched off and this layer is reported as blocked rather than erased.',
         'We will not tell you something has been permanently erased unless we have checked it ourselves.',
       ],
     },
