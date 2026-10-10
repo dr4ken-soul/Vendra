@@ -26,7 +26,7 @@ export default async function DealPage({
 }) {
   const user = await requireUser('/app/deals');
   const { dealId } = await params;
-  const { shop: shopId, shop, membership } = await requireShop(
+  const { shop, membership } = await requireShop(
     user.userId,
     (await searchParams).shop,
     `/app/deals/${dealId}`,

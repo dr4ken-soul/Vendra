@@ -11,6 +11,18 @@ import { publicEnv } from '@/lib/env';
  * Ends the session and clears the auth cookies. The sign-in server actions live
  * in src/lib/auth-actions.ts, because a route handler cannot export server
  * actions.
+ *
+ * This file lives at `api/auth/signout/route.ts` and must stay there.
+ *
+ * It previously sat at `api/auth/route.ts` while its own docstring said
+ * `/api/auth/signout`, so the handler was mounted at `/api/auth` and the URL the
+ * sign-out button calls returned 404. The button ignored the status, navigated
+ * to /sign-in, and the middleware bounced the still-valid session straight back
+ * into the app. To a user that reads as "sign out does nothing" — it looks like
+ * the app refusing to let them out rather than a missing route.
+ *
+ * The call site now checks the response status instead of only catching network
+ * failures, because a 404 is a successful fetch and so was never caught.
  */
 export const POST = withErrorHandling(async () => {
   const cookieStore = await cookies();

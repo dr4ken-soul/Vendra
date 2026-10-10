@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { usePathname, useRouter } from 'next/navigation';
+import { usePathname } from 'next/navigation';
 import { AnimatePresence, motion } from 'motion/react';
 import { useEffect, useRef, useState } from 'react';
 import type { ShopRole, ShopPermission } from '@/lib/types';
@@ -46,10 +46,10 @@ export function AppShell({
   email: string | null;
 }) {
   const pathname = usePathname();
-  const router = useRouter();
   const [moreOpen, setMoreOpen] = useState(false);
   const [shopMenuOpen, setShopMenuOpen] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
+  const [signOutError, setSignOutError] = useState<string | null>(null);
   const sheetRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
   const sheetTriggerRef = useRef<HTMLButtonElement>(null);
@@ -114,13 +114,38 @@ export function AppShell({
   const signOut = async () => {
     setSigningOut(true);
     try {
-      await fetch('/api/auth/signout', { method: 'POST' });
-      // Client navigation rather than a location assignment, so the server
-      // components for /sign-in are fetched through the router.
-      router.push('/sign-in');
-      router.refresh();
+      const res = await fetch('/api/auth/signout', { method: 'POST' });
+
+      /**
+       * The status has to be checked, not just the absence of a network error.
+       *
+       * A 404 is a successful fetch, so a catch alone never sees it. That is how
+       * a missing route became "sign out does nothing": the button navigated to
+       * /sign-in, the session was still valid, and the middleware sent the user
+       * straight back into the app. Reporting the failure is better than
+       * pretending to have signed out.
+       */
+      if (!res.ok) {
+        setSigningOut(false);
+        setSignOutError('Signing out failed. Try again, or clear cookies for this site.');
+        return;
+      }
+
+      setSignOutError(null);
+      /**
+       * A full document navigation, deliberately, and the lint rule against it is
+       * suppressed with the reason rather than worked around.
+       *
+       * router.push() would keep the client alive, and the middleware that
+       * redirects a signed-in user away from /sign-in does not get to re-run for
+       * a document it never fetches. The previous implementation did exactly
+       * that and appeared to sign out while leaving the session intact.
+       */
+      // eslint-disable-next-line @next/next/no-location-assign-relative-destination
+      window.location.assign('/sign-in');
     } catch {
       setSigningOut(false);
+      setSignOutError('Signing out failed. Check your connection and try again.');
     }
   };
 
@@ -368,6 +393,13 @@ export function AppShell({
                 >
                   {signingOut ? 'Signing out…' : 'Sign out'}
                 </button>
+                {/* Shown in the menu rather than a toast, so the reason is still
+                    there after the menu closes. */}
+                {signOutError && (
+                  <p role="alert" className="px-1 text-xs leading-relaxed text-[var(--error)]">
+                    {signOutError}
+                  </p>
+                )}
               </div>
             </motion.div>
           </>
