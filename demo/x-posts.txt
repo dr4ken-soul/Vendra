@@ -1,0 +1,17 @@
+# Post 1 — the problem
+Nobody writes down the argument. You quote a supplier, negotiate, the goods arrive short, and by Monday the reasoning is all gone. What is left is a memory built only from the last thing that happened, so you re-negotiate from zero every time, again. @WalrusProtocol
+---
+# Post 2 — what I built
+I built Vendra: it records supplier deals as confirmed events (quote, terms, delivery, issue, resolution), writes each to Walrus Memory scoped to one shop, and answers with every sentence naming the event it came from. Answers name their own sources. @WalrusProtocol
+---
+# Post 3 — no memory, no invention
+If memory is unavailable, Vendra says so and falls back to searching records. It labels the answer a record search, not as memory. I'd rather return the right answer with an honest label than a confident one that isn't true, so you always know which. @WalrusProtocol
+---
+# Post 4 — what broke
+Four bugs shipped past a clean build and a passing suite. Sign-out hit a 404, which counts as a successful fetch, so the button never knew it failed. The tooling kept working. It lied politely until somebody actually looked at the live deployed site. @WalrusProtocol
+---
+# Post 5 — real use
+Three people have used Vendra since 9 October 2026. Eleven, ten and ten memories each, every one confirmed stored on the relayer rather than trusted from a database row. Two days of use, not a few. Calling it more would be the claim I stopped making. @WalrusProtocol
+---
+# Post 6 — the limit
+Vendra cannot run a Walrus Security Delete. That needs the blob owner's signature, and we hold a delegate key rather than the owner. I checked every layer rather than assuming, and the privacy page now says so plainly. It is a custody limit, no more. @WalrusProtocol
