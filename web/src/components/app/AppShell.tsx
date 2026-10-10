@@ -274,13 +274,27 @@ export function AppShell({
             </div>
 
             <div className="flex shrink-0 items-center gap-2">
-              <span
+              {/*
+                The avatar is the desktop route into the account menu.
+
+                It was a plain <span>, and the only menu carrying Sign out was the
+                mobile "More" sheet, which is `lg:hidden`. So on a desktop browser
+                there was no way to reach Sign out at all — not a broken button,
+                no button. Retailers share machines and offices, so leaving a
+                session open with no way to end it is a privacy problem, not a
+                missing feature.
+              */}
+              <button
+                type="button"
+                onClick={() => setMoreOpen(true)}
+                aria-haspopup="menu"
+                aria-expanded={moreOpen}
                 title={email ?? undefined}
-                className="inline-flex size-10 items-center justify-center rounded-full border border-[var(--border-default)] bg-[var(--surface-muted)] font-body text-sm font-semibold text-[var(--text-primary)]"
+                className="inline-flex size-10 items-center justify-center rounded-full border border-[var(--border-default)] bg-[var(--surface-muted)] font-body text-sm font-semibold text-[var(--text-primary)] transition-colors duration-[120ms] hover:bg-[var(--bg-secondary)]"
               >
-                <span className="sr-only">Signed in as {displayName ?? email ?? 'you'}</span>
+                <span className="sr-only">Account menu, signed in as {displayName ?? email ?? 'you'}</span>
                 {(displayName ?? email ?? 'V').charAt(0).toUpperCase()}
-              </span>
+              </button>
             </div>
           </div>
 
@@ -340,18 +354,26 @@ export function AppShell({
               className="fixed inset-0 z-[52] bg-[rgba(36,42,39,0.42)] lg:hidden"
               aria-hidden="true"
             />
+            {/*
+              On desktop the same panel becomes a dropdown anchored to the avatar
+              rather than a bottom sheet. A sheet is the right shape for a thumb
+              on a phone and the wrong shape for a pointer on a desktop, and the
+              `lg:hidden` on the sheet meant desktop had no account menu at all.
+              The scrim stays mobile-only: a full-screen dismiss layer is not
+              wanted behind a small menu.
+            */}
             <motion.div
               ref={sheetRef}
               role="dialog"
-              aria-modal="true"
-              aria-label="More options"
-              initial={{ y: '100%' }}
-              animate={{ y: 0 }}
-              exit={{ y: '100%', transition: { duration: 0.12 } }}
+              aria-label="Account menu"
+              initial={{ y: '100%', opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              exit={{ y: '100%', opacity: 0, transition: { duration: 0.12 } }}
               transition={{ type: 'spring', stiffness: 300, damping: 25 }}
-              className="fixed inset-x-0 bottom-0 z-[55] max-h-[80dvh] overflow-y-auto rounded-t-2xl border border-[var(--border-default)] bg-[var(--bg-surface)] px-5 pb-[calc(1rem+env(safe-area-inset-bottom))] pt-6 lg:hidden"
+              className="fixed inset-x-0 bottom-0 z-[55] max-h-[80dvh] overflow-y-auto rounded-t-2xl border border-[var(--border-default)] bg-[var(--bg-surface)] px-5 pb-[calc(1rem+env(safe-area-inset-bottom))] pt-6 lg:inset-x-auto lg:bottom-auto lg:right-6 lg:top-16 lg:z-[54] lg:max-h-[70vh] lg:w-80 lg:rounded-2xl lg:border lg:shadow-lg"
             >
-              <div className="mx-auto mb-4 h-1 w-10 rounded-full bg-[var(--border-strong)]" aria-hidden="true" />
+              {/* The grab handle belongs to the bottom sheet, not to the desktop dropdown. */}
+              <div className="mx-auto mb-4 h-1 w-10 rounded-full bg-[var(--border-strong)] lg:hidden" aria-hidden="true" />
 
               <div className="flex items-center justify-between gap-4">
                 <div className="min-w-0">
