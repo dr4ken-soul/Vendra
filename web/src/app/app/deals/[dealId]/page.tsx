@@ -3,6 +3,7 @@ import { notFound } from 'next/navigation';
 import { requireShop, requireUser } from '@/lib/tenancy';
 import { getDealDetail } from '@/lib/data/queries';
 import { DealDetailView } from '@/components/app/DealDetailView';
+import { reconcilePendingWrites } from '@/lib/memory/service';
 import { todayInputValue } from '@/lib/format';
 
 export const metadata: Metadata = { title: 'Deal' };
@@ -37,6 +38,16 @@ export default async function DealPage({
    * is indistinguishable from one that does not exist. Resolving the shop first
    * and then passing only `shop.id` is what makes that true.
    */
+  /**
+   * Reconcile before reading the detail.
+   *
+   * This is the screen that shows "Memory syncing" per event, so it is the worst
+   * possible place for a stored memory to be reported as still being written.
+   * Thirty-one rows across three real shops sat that way because reconciliation
+   * only ran on Ask and Settings.
+   */
+  await reconcilePendingWrites(shop.id);
+
   const detail = await getDealDetail(shop.id, dealId);
   if (!detail) notFound();
 

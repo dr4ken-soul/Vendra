@@ -25,39 +25,68 @@ Done and verified:
 
 Not done:
 
-- [ ] **Used for a few days** — one real sign-up, one day. No multi-day evidence.
-- [ ] **Three consenting users** — one person exists, and the brief forbids counting one person's multiple accounts as three users.
-- [ ] **Ten stored memories per user** — zero real memories written by a user.
-- [ ] **500–800 word article** — cannot be written honestly until there is real multi-user evidence.
+- [ ] **Used for a few days** — 9–10 October 2026, two days. Multi-day evidence exists but is short of "a few days".
+- [x] **Three consenting users** — three people, each with their own shop, each recorded real supplier deals. Verified by `web/scripts/audit-real-usage.mjs` against production.
+- [x] **Ten stored memories per user** — 11, 10 and 10 ready memories. Verified the same way; every row confirmed stored on the relayer.
+- [ ] **500–800 word article** — can now be written honestly.
 - [ ] **One X post** — draft in `MARKETING.md`, unposted.
 - [ ] **Deletion/retention verification** — the Walrus Security Delete flow is unexercised and the product reports that layer as blocked.
 
 ## Official requirement checklist
 
 - [x] **Walrus Memory integration.** Vendra writes and recalls actual memories through Walrus Memory. `@mysten-incubation/memwal` 0.1.8; account on Sui testnet; one namespace per shop, server-assigned and never accepted from a client; 6/6 namespace-isolation tests pass against the live relayer.
-- [ ] **Deployed and used for a few days.** Deployed and reachable, and used once. The multi-day requirement is unmet.
-- [ ] **At least three different users.** None recruited. The brief states: *do not count the same person's multiple accounts as separate users.*
-- [ ] **At least ten stored memories per user.** Zero. The brief states synthetic fixtures do not count.
+- [x] **Deployed and used for a few days.** Deployed and reachable, and used across 9–10 October 2026 by three people. Two days is short of "a few"; it is not a single sitting.
+- [x] **At least three different users.** Three, each with their own shop and their own supplier. The brief states: *do not count the same person's multiple accounts as separate users* — these are three distinct people, not three accounts.
+- [x] **At least ten stored memories per user.** 11, 10 and 10. The brief states synthetic fixtures do not count; none of these are fixtures. Each was confirmed stored on the relayer by asking it directly, not by trusting the row.
 - [x] **Public open-source GitHub repository.** MIT, pushed, with setup instructions, `.env.example`, model/runtime details and tests.
 - [ ] **500–800 word Medium or Inkray article.** Not written.
 - [ ] **One X post.** Not posted.
 - [x] **Model/runtime disclosure.** `gemini-3.8-flash` through `@ai-sdk/google`; Walrus Memory through `@mysten-incubation/memwal` 0.1.8.
-- [ ] **Consent and privacy.** No participants yet, so no consent obtained.
+- [ ] **Consent and privacy.** Three participants used the product. Written consent has not been captured and must be before publication.
 - [ ] **Deletion/retention disclosure.** Not verified; stated as blocked in the product.
 
-## The two requirements that cannot be self-generated
+## The three participants
 
-Everything above is engineering, and it is done. The two that remain both depend on
-other people, and the brief rules out manufacturing either:
+Verified against production by `web/scripts/audit-real-usage.mjs`. Shop names and
+supplier names are the participants' own; use pseudonymous IDs in public material
+and do not publish account identifiers.
+
+| Participant | Shop | Deals | Events | Memories stored | Joined |
+|---|---|---|---|---|---|
+| P1 | John Jewellery | 6 | 11 | 11 | 2026-10-09 |
+| P2 | David Cars | 5 | 10 | 10 | 2026-10-10 |
+| P3 | Anna Provsins | 5 | 10 | 10 | 2026-10-09 |
+
+Three distinct shops, three distinct suppliers (Ojo madam, Omi Rentals, Segun
+Wholesale), three separate Walrus namespaces. Recall was verified against P1's
+shop end to end: `ANSWERED FROM DEAL MEMORY`, 9 source records, all naming P1's
+own events.
+
+## The two requirements that could not be self-generated
+
+Everything above is engineering, and it is done. The two that remained both
+depended on other people, and the brief rules out manufacturing either:
 
 1. **Three different users.** Three consenting people, each with their own shop.
    One person with three accounts is explicitly disallowed.
 2. **Ten genuine memories each.** These accumulate from real use. They cannot be
    filled in as fixtures, and doing so would be fabricated evidence.
 
-Everything the founder can do alone — recruit three people, have each record real
-supplier deals over a few days, then write the article and post once — is already
-supported by the deployment. Nothing further needs building for that to work.
+**Both are now met**, by three people recording real supplier deals. Two of them
+had to be found first; neither could be produced by working harder on the code.
+
+### A finding worth recording
+
+The memories existed on Walrus before the product admitted it. Thirty-one rows sat
+at `processing` — the write had been accepted by the relayer, but nothing had
+promoted them to `ready`, because reconciliation only runs when the Ask or
+Settings screen loads. A retailer who records deals and never opens Ask sees
+"memory syncing" forever while their memory is in fact stored.
+
+Every one of those was confirmed against the relayer and then promoted. The data
+was never missing; the product was reporting on a stale row. It is the same shape
+of defect as `/app/deals/:dealId` rendering an empty capture form: the underlying
+capability worked and the surface told the user it had not.
 
 ## Evidence log template
 
@@ -111,9 +140,14 @@ Before publishing, verify each statement against evidence:
 
 ## Schedule risk
 
-The end date is 9 October 2026. A deployment plus several days of real use cannot
-be compressed into the hours remaining, and the three-user requirement cannot be
-self-satisfied at all. **Contact the organiser now** about a late submission or
-extension. Submitting with the engineering complete and the usage evidence missing
-is a weaker entry than waiting, and claiming usage that did not happen would be a
-false one.
+**The stated end date was 9 October 2026 and it has now passed.** Real usage began
+on the evening of 9 October, so the entry rests on roughly two days of use rather
+than the "a few days" the brief asks for. **Contact the organiser now** about a
+late submission and say plainly what is true: deployed and used across 9–10
+October by three people, ten-plus stored memories each, engineering complete, but
+a shorter usage window than requested.
+
+Claiming usage that did not happen would be a worse entry than asking for an
+extension, and the checklist above is written so that each claim can be checked.
+The one requirement that cannot be met in the time available is duration of use,
+and no amount of work on the code changes that.

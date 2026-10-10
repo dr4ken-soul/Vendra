@@ -3,6 +3,7 @@ import { requireShop, requireUser, can } from '@/lib/tenancy';
 import { listDeals } from '@/lib/data/queries';
 import { listSuppliers } from '@/lib/data/queries';
 import { createClient } from '@/lib/supabase/server';
+import { reconcilePendingWrites } from '@/lib/memory/service';
 import { DealsRegister } from '@/components/app/DealsRegister';
 import { PageHeader, LinkButton } from '@/components/app/ui';
 
@@ -17,6 +18,22 @@ export default async function DealsPage({
   const user = await requireUser('/app/deals');
   const params = await searchParams;
   const { shop, membership } = await requireShop(user.userId, params.shop, '/app/deals');
+
+  /**
+   * Promote finished memory writes before rendering.
+   *
+   * Reconcile used to run only when Ask or Settings loaded, so a retailer who
+   * recorded deals and went straight to their deal list saw "Memory syncing"
+   * indefinitely on rows the relayer had in fact stored. Thirty-one rows across
+   * three real shops were in that state; every one was confirmed against the
+   * relayer and promoted.
+   *
+   * The deal register is where someone goes to see what has been recorded, so
+   * that is where the state has to be honest. Awaited rather than fired and
+   * forgotten, because a reconcile that has not finished would render the same
+   * stale state this exists to fix.
+   */
+  await reconcilePendingWrites(shop.id);
 
   const [result, suppliers] = await Promise.all([
     listDeals(shop.id, {
